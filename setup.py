@@ -2,7 +2,7 @@ import os
 import sys
 from setuptools import setup
 
-__version__ = '0.1.0'
+__version__ = '0.2.0'
 
 setup(
     name = "s2g",
@@ -14,10 +14,13 @@ setup(
     long_description='''''',
     license = "MIT",
     packages = ['s2g'],
-    keywords = ['shapefile', 'graph', 'network'],
+    keywords = ['shapefile', 'graph', 'network', 'GIS'],
     install_requires=[
-          'fiona',
-          'shapely'
+        'fiona',
+        'shapely',
+        'networkx',
+        'matplotlib',
+        'numpy'
       ],
     classifiers = [
         'Development Status :: 4 - Beta',
