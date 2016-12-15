@@ -4,6 +4,7 @@ import logging
 import matplotlib
 import sys
 import pickle
+import fiona
 
 import networkx as nx
 import numpy as np
@@ -11,7 +12,6 @@ import numpy as np
 matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
 from shapely.geometry import shape, Point, LineString
-from shapely.ops import linemerge
 from itertools import product
 import progressbar
 
@@ -75,26 +75,24 @@ def line_contains(line, point, buf=10e-5):
 def lines_touch(one, other, buf=10e-5):
     """Predict the connection of two lines
     """
-    # fast checking with bounds (minx, miny, maxx, maxy)
-    def bounds_overlay(b1, b2):
-        for i, j in product([0, 2], [1, 3]):
-            px, py = (b1[i], b1[j])
-            if b2[0] <= px <= b2[2] and b2[1] <= py <= b2[3]:
-                return True
-        return False
-
-    if not bounds_overlay(one.bounds, other.bounds):
-        False
-
-    def touches_ends(one, other, buf):
+    def ends_touch(one, other, buf):
         v1 = Point(other.coords[0]).buffer(buf)
         v2 = Point(other.coords[-1]).buffer(buf)
         if one.intersects(v1) or one.intersects(v2):
             return True
         return False
 
-    return touches_ends(one, other, buf) or \
-           touches_ends(other, one, buf)
+    return ends_touch(one, other, buf) \
+           or ends_touch(other, one, buf)
+
+def bounds_overlay(b1, b2):
+    """Checking overlay by bounds (minx, miny, maxx, maxy)
+    """
+    for i, j in product([0, 2], [1, 3]):
+        px, py = (b1[i], b1[j])
+        if b2[0] <= px <= b2[2] and b2[1] <= py <= b2[3]:
+            return True
+    return False
 
 
 def point_projects_to_line(point, line):
@@ -159,19 +157,41 @@ def cut_line(line, resolution=1.0):
 
 
 class ShapeGraph(object):
-    def __init__(self, geoms):
-        self.geoms = [line for line in geoms]  # raw lines
+    def __init__(self, geoms=None, shapefile=None, to_graph=True,
+                 resolution=1.0, coord_type='lonlat', point_buffer=10e-5):
+        # raw lines
+        assert not (geoms is None and shapefile is None)
+        assert not (geoms is not None and shapefile is not None)
+        if shapefile is not None:
+            self.geoms = []
+            with fiona.open(shapefile) as source:
+                for r in source:
+                    s = shape(r['geometry'])
+                    if s.geom_type == 'LineString':
+                        self.geoms.append(s)
+                    else:
+                        logging.warning('Misc geometry type encountered and omit: {0}'.format(s.geom_type))
+        else:
+            self.geoms = [line for line in geoms]
+        # parameters
+        self.resolution = resolution
+        self.coord_type = coord_type
+        self.point_buffer = point_buffer
+        # components
         self.connected = False
-        self.connectivity = None
-        self.major_components = None
+        self.connectivity = []  # line neighborhoods
+        self.major_components = []
         # global edge info
         self.node_ids = {}
         self.node_xy = {}
         self._edges = {}
-        # cut-line info
+        # line cuts info
         self.line_cuts = {}
         self.nodes_counter = 0
         self.graph = nx.Graph()
+        if to_graph:
+            self.gen_major_components()
+            self.to_networkx()
 
     def _register_edge(self, p1, p2, dist):
         assert isinstance(p1, Point) or len(p1) == 2
@@ -203,17 +223,19 @@ class ShapeGraph(object):
             del self._edges[edge]
 
     def gen_major_components(self):
-        """Merge individual lines into groups of touching lines.
+        """
+        Merge individual lines into groups of touching lines.
+        :return: a tuple of (connected, connectivity, major_components)
         """
         lines = self.geoms
         L = len(lines)
         pairs = []
-        logging.info("Validating line connections in raw shapefile")
-        with progressbar.ProgressBar(max_value=L*L) as bar:
-            for i, j in product(range(0, L), range(0, L)):
-                bar.update(i*L+j+1)
-                if j < i:
-                    continue
+        logging.info("Validating pair-wise line connections of raw shapefiles (total {0} lines)".format(L))
+        neighbors = [(i, j) for i, j in product(range(0, L), range(0, L)) if j >= i]
+        with progressbar.ProgressBar(max_value=len(neighbors)) as bar:
+            for k in range(0, len(neighbors)):
+                bar.update(k+1)
+                i, j = neighbors[k]
                 if lines_touch(lines[i], lines[j]):
                     pairs.append((i, j))
 
@@ -232,11 +254,28 @@ class ShapeGraph(object):
         # predict if all lines are strongly connected
         self.connected = True if len(self.major_components) == 1 else False
 
-        return \
-            self.connected, self.connectivity, self.major_components
+        # statistics
+        print("Major components statistics:")
+        print("\tTotal components: {0}".format(len(self.major_components)))
+        size = [len(c) for c in self.major_components]
+        print("\tComponent size: max {0}, median {1}, min {2}, average {3}"\
+              .format(np.max(size), np.median(size), np.min(size), np.average(size)))
+        print("\tTop comp. sizes: {0}".format(' '.join([str(i) for i in size[0:10]])))
+
+        return self.connected, self.connectivity, self.major_components
+
+    def largest_component(self):
+        """
+        Get the largest connected component.
+        :return: a list of lines consists of the largest component
+        """
+        return self.major_components[0]
 
     def dump_major_components(self, ofile):
-        """Dump lines' connectivity and major components to pickle file.
+        """
+        Dump lines' connectivity and major components to pickle file.
+        :param ofile: output file instance with a writer method, e.g. as open() instance
+        :return: None
         """
         pickle.dump((self.connected, self.connectivity, self.major_components), ofile)
 
@@ -247,7 +286,7 @@ class ShapeGraph(object):
             pickle.load(pickle_file)
         self.major_components = sorted(major_components, key=len, reverse=True)
 
-    def to_networkx(self, resolution=1.0, coord_type='lonlat', point_buffer=10e-5):
+    def to_networkx(self):
         """Convert the major component to graph of NetworkX.
         """
         if self.major_components is None:
@@ -257,13 +296,13 @@ class ShapeGraph(object):
         logging.info('Processing the largest component with {0} lines'.format(len(major)))
 
         # do line cutting
-        logging.info('Cutting lines with specific resolution = {0} km'.format(resolution))
+        logging.info('Cutting lines with specific resolution = {0} km'.format(self.resolution))
         with progressbar.ProgressBar(max_value=len(major)) as bar:
             for i in range(len(major)):
                 bar.update(i+1)
                 lid = major[i]
                 line = self.geoms[lid]
-                cuts, dist = cut_line(line, resolution)
+                cuts, dist = cut_line(line, self.resolution)
 
                 # record cut-line info
                 self.line_cuts[lid] = (cuts, dist)
@@ -290,7 +329,7 @@ class ShapeGraph(object):
                 e1, e2 = eline.coords[0], eline.coords[-1]
 
                 for l, p in zip([s, s, e, e], [e1, e2, s1, s2]):
-                    self._add_point_to_line(l, p)
+                    self._bridge_joint(l, p)
                     # assert p in self.node_ids
 
         # assemble graph
@@ -302,8 +341,11 @@ class ShapeGraph(object):
 
         return self.graph
 
-    def _add_point_to_line(self, line_index, point, point_buffer=10e-5):
+    def _bridge_joint(self, line_index, point):
         """Project a point to line when they intersect within a buffer.
+        In the bridge algorithm, when a cut segment intersects with given point,
+        the original cut segment is replaced by a bridge of new edges between given
+        point and end of the segment. e.g., (a -> b  joint p) ==> (a -> p -> b)
         """
         coords = self.geoms[line_index].coords
         cuts, distances = self.line_cuts[line_index]
@@ -316,7 +358,7 @@ class ShapeGraph(object):
 
             segment = LineString(coords[sp:ep + 1])
             assert coords[ep] == segment.coords[-1]
-            buffered_point = Point(point).buffer(point_buffer)
+            buffered_point = Point(point).buffer(self.point_buffer)
 
             if segment.intersects(buffered_point):
                 found = True
@@ -347,7 +389,7 @@ class ShapeGraph(object):
         """
         Return the nearest graph node to given point.
         :param point: a tuple of (lon, lat) or shapely Point
-        :param distance_tolerance: approximated buffer range in km
+        :param distance_tolerance: approximated buffer range in kilometers
         :return: (nearest_node_id, nearest_node_lonlat) or None
         """
         p = Point(point)

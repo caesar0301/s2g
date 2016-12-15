@@ -1,5 +1,61 @@
 # python-s2g
-Shapefile to graph/network converter in Python
+
+(S)hapefile (2) Graph/network converter in Python
+
+When we process GIS data, a non-trivial problem is the conversion from shape lines to graph or network data structure.
+The latter may benefit from these out-of-box graphical libraries such as [networkx](http://networkx.github.io/)
+and [igraph](http://igraph.org/python/). But the conversion is a headache to components open communities.
+This mostly urges me to finish this tiny but useful library.
+ 
+# Install
+
+```$xslt
+pip install -U s2g
+```
+
+# Usage
+
+You have two alternative ways to construct the graph. One is reading from a raw shapefiles with `LineString` objects.
+(Under the hood, I involve [fiona](https://pypi.python.org/pypi/Fiona/) to read geometries and
+[shapely](https://pypi.python.org/pypi/Shapely) to analyze the data.).
+Currently, this tool only supports conversion to *undirected graph*.
+
+```python
+import s2g
+import networkx as nx
+
+sg = s2g.ShapeGraph(shapefile='path/to/roads.shp')
+assert isinstance(sg.graph, nx.Graph)
+```
+
+The other way is designed for programmable usage or time-consuming process where intermediate data could be sniffed or
+saved. Here is an example to read lines with [fiona]:
+
+```python
+import s2g
+import fiona
+from shapely.geometry import shape, LineString
+
+shp = 'path/to/shapefile.shp'
+
+with fiona.open(shp) as source:
+    geoms = []
+    for r in source:
+        s = shape(r['geometry'])
+        if isinstance(s, LineString):
+            geoms.append(s)
+
+# create ShapeGraph object from a list of lines
+sg = s2g.ShapeGraph(geoms, to_graph=False)
+
+# detect major components
+mc = sg.gen_major_components()
+# major components are mc[2]
+
+# convert the largest component to networkx Graph
+graph = sg.to_networkx()  # equivalently sg.graph
+```
+
 
 ## References
 
