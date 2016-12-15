@@ -230,6 +230,12 @@ class ShapeGraph(object):
             self.gen_major_components()
             self.to_networkx()
 
+    def _edge_key(self, p1, p2):
+        return tuple(sorted([self.node_ids[p1], self.node_ids[p2]]))
+
+    def _edge_key2(self, id1, id2):
+        return tuple(sorted([id1, id2]))
+
     def _register_edge(self, p1, p2, dist):
         assert isinstance(p1, Point) or len(p1) == 2
         if p1 not in self.node_ids:
@@ -240,7 +246,7 @@ class ShapeGraph(object):
             self.node_ids[p2] = self.nodes_counter
             self.nodes_counter += 1
             self.node_xy[self.node_ids[p2]] = p2
-        edge = tuple(sorted([self.node_ids[p1], self.node_ids[p2]]))
+        edge = self._edge_key(p1, p2)
         if edge not in self._edges:
             self._edges[edge] = dist
 
@@ -255,7 +261,7 @@ class ShapeGraph(object):
         # del self.node_ids[p2]
         # del self.node_xy[id1]
         # del self.node_xy[id2]
-        edge = tuple(sorted([id1, id2]))
+        edge = self._edge_key2(id1, id2)
         if edge in self._edges:
             del self._edges[edge]
 
@@ -451,10 +457,25 @@ class ShapeGraph(object):
     def point_projects_to_edges(self, point, distance_tolerance=0.0):
         pass
 
-    def bounded_graph(self, minx, miny, maxx, maxy):
+    def subgraph_within_box(self, bounding_box):
         """
-        Get the
+        Extract a subgraph bouneded by a box.
+        :param bounding_box: the bounding coordinates in
+            (minx, miny, maxx, maxy) or a Polygon instance
+        :return: a subgraph of nx.Graph
         """
+        if isinstance(bounding_box, Polygon):
+            bbox = bounding_box
+        else:
+            bbox = box(bounding_box[0], bounding_box[1],
+                       bounding_box[2], bounding_box[3])
+        nbunch = set()
+        for edge in self.graph.edges():
+            s, e = edge
+            if bbox.intersects(LineString([self.node_xy[s], self.node_xy[e]])):
+                nbunch.add(s)
+                nbunch.add(e)
+        return self.graph.subgraph(nbunch)
 
 
 if __name__ == '__main__':
