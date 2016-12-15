@@ -13,6 +13,7 @@ import matplotlib.pyplot as plt
 from shapely.geometry import shape, Point, LineString
 from shapely.ops import linemerge
 from itertools import product
+import progressbar
 
 logging.basicConfig(stream=sys.stderr, level=logging.INFO)
 
@@ -72,9 +73,20 @@ def line_contains(line, point, buf=10e-5):
 
 
 def lines_touch(one, other, buf=10e-5):
-    """Predict the connection of two lines"""
+    """Predict the connection of two lines
+    """
+    # fast checking with bounds (minx, miny, maxx, maxy)
+    def bounds_overlay(b1, b2):
+        for i, j in product([0, 2], [1, 3]):
+            px, py = (b1[i], b1[j])
+            if b2[0] <= px <= b2[2] and b2[1] <= py <= b2[3]:
+                return True
+        return False
 
-    def touches_ends(one, other, buf=10e-5):
+    if not bounds_overlay(one.bounds, other.bounds):
+        False
+
+    def touches_ends(one, other, buf):
         v1 = Point(other.coords[0]).buffer(buf)
         v2 = Point(other.coords[-1]).buffer(buf)
         if one.intersects(v1) or one.intersects(v2):
@@ -196,11 +208,14 @@ class ShapeGraph(object):
         lines = self.geoms
         L = len(lines)
         pairs = []
-        for i, j in product(range(0, L), range(0, L)):
-            if j < i:
-                continue
-            if lines_touch(lines[i], lines[j]):
-                pairs.append((i, j))
+        logging.info("Validating line connections in raw shapefile")
+        with progressbar.ProgressBar(max_value=L*L) as bar:
+            for i, j in product(range(0, L), range(0, L)):
+                bar.update(i*L+j+1)
+                if j < i:
+                    continue
+                if lines_touch(lines[i], lines[j]):
+                    pairs.append((i, j))
 
         # validate lines connectivity
         graph = nx.Graph()
@@ -216,6 +231,7 @@ class ShapeGraph(object):
 
         # predict if all lines are strongly connected
         self.connected = True if len(self.major_components) == 1 else False
+
         return \
             self.connected, self.connectivity, self.major_components
 
@@ -238,39 +254,44 @@ class ShapeGraph(object):
             self.gen_major_components()
 
         major = list(self.major_components[0])
-        logging.info('Use the largest component of {0} lines'.format(len(major)))
+        logging.info('Processing the largest component with {0} lines'.format(len(major)))
 
         # do line cutting
         logging.info('Cutting lines with specific resolution = {0} km'.format(resolution))
-        for lid in major:
-            line = self.geoms[lid]
-            cuts, dist = cut_line(line, resolution)
+        with progressbar.ProgressBar(max_value=len(major)) as bar:
+            for i in range(len(major)):
+                bar.update(i+1)
+                lid = major[i]
+                line = self.geoms[lid]
+                cuts, dist = cut_line(line, resolution)
 
-            # record cut-line info
-            self.line_cuts[lid] = (cuts, dist)
+                # record cut-line info
+                self.line_cuts[lid] = (cuts, dist)
 
-            # record edges info
-            for j in range(1, len(cuts)):
-                self._register_edge(line.coords[cuts[j - 1]],
-                                    line.coords[cuts[j]],
-                                    dist[j])
+                # record edges info
+                for j in range(1, len(cuts)):
+                    self._register_edge(line.coords[cuts[j - 1]],
+                                        line.coords[cuts[j]],
+                                        dist[j])
 
         # intersection interpolation for each connected edge pair
-        logging.info('Intersection interpolation for connected (touched) edges')
-        for s, e in self.connectivity:
-            if s == e:
-                continue
-            if s not in major or e not in major:
-                continue
+        logging.info('Joint interpolation for connected (touched) edges')
+        pairs = [i for i in self.connectivity \
+                 if i[0] != i[1] and i[0] in major and i[1] in major]
 
-            sline = self.geoms[s]
-            eline = self.geoms[e]
-            s1, s2 = sline.coords[0], sline.coords[-1]
-            e1, e2 = eline.coords[0], eline.coords[-1]
+        with progressbar.ProgressBar(max_value=len(pairs)) as bar:
+            for i in range(len(pairs)):
+                bar.update(i+1)
+                s, e = pairs[i]
 
-            for l, p in zip([s, s, e, e], [e1, e2, s1, s2]):
-                self._add_point_to_line(l, p)
-                assert p in self.node_ids
+                sline = self.geoms[s]
+                eline = self.geoms[e]
+                s1, s2 = sline.coords[0], sline.coords[-1]
+                e1, e2 = eline.coords[0], eline.coords[-1]
+
+                for l, p in zip([s, s, e, e], [e1, e2, s1, s2]):
+                    self._add_point_to_line(l, p)
+                    # assert p in self.node_ids
 
         # assemble graph
         for edge, dist in self._edges.items():

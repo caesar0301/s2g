@@ -20,7 +20,8 @@ setup(
         'shapely',
         'networkx',
         'matplotlib',
-        'numpy'
+        'numpy',
+        'progressbar2'
       ],
     classifiers = [
         'Development Status :: 4 - Beta',
