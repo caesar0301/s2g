@@ -11,16 +11,16 @@ import numpy as np
 
 matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
-from shapely.geometry import shape, Point, LineString
+from shapely.geometry import shape, Point, LineString, box, Polygon
 from itertools import product
 import progressbar
 
 logging.basicConfig(stream=sys.stderr, level=logging.INFO)
 
 __all__ = [
-    'plot_lines', 'great_circle_dist', 'line_distance', 'line_contains',
+    'plot_lines', 'great_circle_dist', 'line_distance', 'line_contains_point',
     'lines_touch', 'point_projects_to_line', 'point_projects_to_points',
-    'cut_line', 'ShapeGraph'
+    'cut_line', 'ShapeGraph', 'lines_within_box', 'bounds_overlay'
 ]
 
 
@@ -67,7 +67,7 @@ def line_distance(coords):
     return np.sum(dist)
 
 
-def line_contains(line, point, buf=10e-5):
+def line_contains_point(line, point, buf=10e-5):
     p = Point(point).buffer(buf)
     return line.intersects(p)
 
@@ -85,14 +85,41 @@ def lines_touch(one, other, buf=10e-5):
     return ends_touch(one, other, buf) \
            or ends_touch(other, one, buf)
 
-def bounds_overlay(b1, b2):
+
+def bounds_overlay(a, b):
     """Checking overlay by bounds (minx, miny, maxx, maxy)
     """
-    for i, j in product([0, 2], [1, 3]):
-        px, py = (b1[i], b1[j])
-        if b2[0] <= px <= b2[2] and b2[1] <= py <= b2[3]:
-            return True
-    return False
+    # for i, j in product([0, 2], [1, 3]):
+    #     px, py = (b1[i], b1[j])
+    #     if b2[0] <= px <= b2[2] and b2[1] <= py <= b2[3]:
+    #         return True
+    # return False
+    bbox1 = box(a[0], a[1], a[2], a[3])
+    bbox2 = box(b[0], b[1], b[2], b[3])
+    return bbox1.intersects(bbox2)
+
+
+def lines_within_box(lines, bounding_box, cut_segment=True):
+    """
+    Extract the bounded segments from a list of lines
+    :param lines: a list of LineString
+    :param bounding_box: the bounding coordinates in (minx, miny, maxx, maxy)
+           or Polygon instance
+    :return: a list of bounded segments
+    """
+    if isinstance(bounding_box, Polygon):
+        bbox = bounding_box
+    else:
+        bbox = box(bounding_box[0], bounding_box[1],
+                   bounding_box[2], bounding_box[3])
+    segments = []
+    for line in lines:
+        if line.intersects(bbox):
+            if cut_segment:
+                segments.append(line.intersection(bbox))
+            else:
+                segments.append(line)
+    return segments
 
 
 def point_projects_to_line(point, line):
@@ -154,6 +181,16 @@ def cut_line(line, resolution=1.0):
         sampled_points.append(i)
     distances.append(acc_dist)
     return sampled_points, distances
+
+
+def cut_line_with_context(line):
+    """
+    A intelligent line cutting algorithm with context info.
+    :param line: a LineString instance of shapely
+    :return: a tuple of (sampled_points_indices, distances)
+    """
+    assert line.geom_type == 'LineString'
+    pass
 
 
 class ShapeGraph(object):
@@ -413,6 +450,11 @@ class ShapeGraph(object):
 
     def point_projects_to_edges(self, point, distance_tolerance=0.0):
         pass
+
+    def bounded_graph(self, minx, miny, maxx, maxy):
+        """
+        Get the
+        """
 
 
 if __name__ == '__main__':
