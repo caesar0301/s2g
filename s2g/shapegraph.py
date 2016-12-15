@@ -289,7 +289,7 @@ class ShapeGraph(object):
     def to_networkx(self):
         """Convert the major component to graph of NetworkX.
         """
-        if self.major_components is None:
+        if len(self.major_components) is None:
             self.gen_major_components()
 
         major = list(self.major_components[0])

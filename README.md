@@ -24,7 +24,7 @@ Currently, this tool only supports conversion to *undirected graph*.
 import s2g
 import networkx as nx
 
-sg = s2g.ShapeGraph(shapefile='path/to/roads.shp')
+sg = s2g.ShapeGraph(shapefile='path/to/roads.shp', to_graph=True)
 assert isinstance(sg.graph, nx.Graph)
 ```
 
