@@ -56,6 +56,7 @@ mc = sg.gen_major_components()
 graph = sg.to_networkx()  # equivalently sg.graph
 ```
 
+Dive into `source doc`(https://github.com/caesar0301/python-s2g/blob/master/s2g/shapegraph.py) to discover other functionalities.
 
 ## References
 
