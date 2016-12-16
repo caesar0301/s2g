@@ -1,0 +1,7 @@
+include README*
+include LICENSE*
+include MANIFEST*
+include *.py
+recursive-include s2g *.py
+recursive-include data campus.*
+recursive-include tests *.py

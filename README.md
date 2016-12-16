@@ -21,10 +21,10 @@ You have two alternative ways to construct the graph. One is reading from a raw 
 Currently, this tool only supports conversion to *undirected graph*.
 
 ```python
-import s2g
+from s2g import ShapeGraph
 import networkx as nx
 
-sg = s2g.ShapeGraph(shapefile='path/to/roads.shp', to_graph=True)
+sg = ShapeGraph(shapefile='path/to/roads.shp', to_graph=True)
 assert isinstance(sg.graph, nx.Graph)
 ```
 
@@ -32,7 +32,7 @@ The other way is designed for programmable usage or time-consuming process where
 saved. Here is an example to read lines with [fiona]:
 
 ```python
-import s2g
+from s2g import ShapeGraph
 import fiona
 from shapely.geometry import shape, LineString
 
@@ -46,7 +46,7 @@ with fiona.open(shp) as source:
             geoms.append(s)
 
 # create ShapeGraph object from a list of lines
-sg = s2g.ShapeGraph(geoms, to_graph=False)
+sg = ShapeGraph(geoms, to_graph=False)
 
 # detect major components
 mc = sg.gen_major_components()
