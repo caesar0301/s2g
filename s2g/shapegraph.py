@@ -101,15 +101,14 @@ class ShapeGraph(object):
         if edge in self._edges:
             del self._edges[edge]
 
-    def road_segment_from_edge(self, n1, n2):
+    def road_segment_from_edge(self, edge):
         """
         Get original road segment in point sequence which is
         bridged by graph edges.
-        :param n1: node id in graph
-        :param n2: node id in graph
+        :param edge: a tuple of two node ids
         :return: the point sequence of raw road segment
         """
-        edge = self._edge_key_by_nodes(n1, n2)
+        edge = self._edge_key_by_nodes(edge[0], edge[1])
         assert edge in self._edges
         return self._edges[edge][1]
 
