@@ -44,16 +44,24 @@ class ShapeGraph(object):
         self.point_buffer = point_buffer
         # components
         self.connected = False
-        self.connectivity = []  # line neighborhoods
-        self.major_components = []
-        # global edge info
-        self.node_ids = {}
-        self.node_xy = {}
-        self._edges = {}
-        # line cuts info
-        self.line_cuts = {}
+        self.connectivity = []     # list, pairs of line indices
+        self.major_components = [] # list of list, line indices
+
+        # global edge info.
+        # note: node_* are redundant.
+        # DO NOT use these to iterate over graph.
+        self.node_ids = {}   # dict, node (lon, lat) to ids
+        self.node_xy = {}    # dict, node ids to (lon, lat)
+        self._edges = {}     # dict, key as self._edge_key
+        # value as (distance, road segment).
+        # For edge bridge, the original road segment is recorded.
+
+        # line cuts info for the largest major component
+        self.line_cuts = {}  # dict, line index to line (cuts, distances)
+        # each cut in *cuts* is a point index of line, including both ends
+        # each value in *distances* is the great circle distance of related segment
         self.nodes_counter = 0
-        self.graph = nx.Graph()
+        self.graph = nx.Graph()  # generated graph data
         if to_graph:
             self.gen_major_components()
             self.to_networkx()
@@ -61,10 +69,10 @@ class ShapeGraph(object):
     def _edge_key(self, p1, p2):
         return tuple(sorted([self.node_ids[p1], self.node_ids[p2]]))
 
-    def _edge_key2(self, id1, id2):
-        return tuple(sorted([id1, id2]))
+    def _edge_key_by_nodes(self, n1, n2):
+        return tuple(sorted([n1, n2]))
 
-    def _register_edge(self, p1, p2, dist):
+    def _register_edge(self, p1, p2, dist, raw_segment):
         assert isinstance(p1, Point) or len(p1) == 2
         if p1 not in self.node_ids:
             self.node_ids[p1] = self.nodes_counter
@@ -76,7 +84,7 @@ class ShapeGraph(object):
             self.node_xy[self.node_ids[p2]] = p2
         edge = self._edge_key(p1, p2)
         if edge not in self._edges:
-            self._edges[edge] = dist
+            self._edges[edge] = (dist, raw_segment)
 
     def _remove_edge(self, p1, p2):
         if p1 not in self.node_ids or p2 not in self.node_ids:
@@ -89,9 +97,21 @@ class ShapeGraph(object):
         # del self.node_ids[p2]
         # del self.node_xy[id1]
         # del self.node_xy[id2]
-        edge = self._edge_key2(id1, id2)
+        edge = self._edge_key_by_nodes(id1, id2)
         if edge in self._edges:
             del self._edges[edge]
+
+    def road_segment_from_edge(self, n1, n2):
+        """
+        Get original road segment in point sequence which is
+        bridged by graph edges.
+        :param n1: node id in graph
+        :param n2: node id in graph
+        :return: the point sequence of raw road segment
+        """
+        edge = self._edge_key_by_nodes(n1, n2)
+        assert edge in self._edges
+        return self._edges[edge][1]
 
     def gen_major_components(self):
         """
@@ -100,20 +120,17 @@ class ShapeGraph(object):
         """
         lines = self.geoms
         L = len(lines)
-        pairs = []
+        graph = nx.Graph()
         logging.info("Validating pair-wise line connections of raw shapefiles (total {0} lines)".format(L))
-        neighbors = [(i, j) for i, j in product(range(0, L), range(0, L)) if j >= i]
+        neighbors = [(i, j) for i, j in product(range(0, L), range(0, L)) if j > i]
         with progressbar.ProgressBar(max_value=len(neighbors)) as bar:
             for k in range(0, len(neighbors)):
                 bar.update(k+1)
                 i, j = neighbors[k]
                 if lines_touch(lines[i], lines[j]):
-                    pairs.append((i, j))
+                    graph.add_edge(i, j)
 
-        # validate lines connectivity
-        graph = nx.Graph()
-        [graph.add_edge(i[0], i[1]) for i in pairs]
-
+        # Validate lines connectivity:
         # Pairs of lines which are connected (touched). These line pairs
         # are not guaranteed to be in the same major component.
         self.connectivity = [i for i in graph.edges() if i[0] != i[1]]
@@ -140,7 +157,7 @@ class ShapeGraph(object):
         Get the largest connected component.
         :return: a list of lines consists of the largest component
         """
-        return self.major_components[0]
+        return list(self.major_components[0])
 
     def dump_major_components(self, ofile):
         """
@@ -180,9 +197,12 @@ class ShapeGraph(object):
 
                 # record edges info
                 for j in range(1, len(cuts)):
-                    self._register_edge(line.coords[cuts[j - 1]],
-                                        line.coords[cuts[j]],
-                                        dist[j])
+                    sinx = cuts[j - 1]
+                    einx = cuts[j]
+                    self._register_edge(line.coords[sinx],
+                                        line.coords[einx],
+                                        dist[j],
+                                        line.coords[sinx:einx+1])
 
         # intersection interpolation for each connected edge pair
         logging.info('Joint interpolation for connected (touched) edges')
@@ -242,11 +262,16 @@ class ShapeGraph(object):
 
                 # split original segment into two parts
                 self._remove_edge(segment.coords[0], segment.coords[-1])
+
                 # replace point with projected one in distance calculation
+                bridged_segment = segment.coords[0:offset + 1]
                 self._register_edge(segment.coords[0], point,
-                                    line_distance(segment.coords[0:offset + 1]))
+                                    line_distance(bridged_segment),
+                                    bridged_segment)
+                bridged_segment = segment.coords[offset:]
                 self._register_edge(point, segment.coords[-1],
-                                    line_distance(segment.coords[offset:]))
+                                    line_distance(bridged_segment),
+                                    bridged_segment)
             if found:
                 break
         return point_result
@@ -256,9 +281,9 @@ class ShapeGraph(object):
                          with_labels=False, arrows=False)
         plt.show()
 
-    def point_projects_to_node(self, point, distance_tolerance=0.1):
+    def point_projects_to_node(self, point, distance_tolerance=0.01):
         """
-        Return the nearest graph node to given point.
+        Return the nearest (in sense of great circle distance) graph node to given point.
         :param point: a tuple of (lon, lat) or shapely Point
         :param distance_tolerance: approximated buffer range in kilometers
         :return: (nearest_node_id, nearest_node_lonlat) or None
@@ -282,8 +307,36 @@ class ShapeGraph(object):
         else:
             return nearest, self.node_xy[nearest]
 
-    def point_projects_to_edges(self, point, distance_tolerance=0.0):
-        pass
+    def point_projects_to_edges(self, point, distance_tolerance=0.01):
+        """
+        Project a point to graph edges considering specific distance tolerance.
+        Note the tolerance is measured by great circle distance to point per se.
+        :param point: a shapely Point instance or (lon, lat) tuple
+        :param distance_tolerance: tolerance of distance in km
+        :return: a list of projected edges, reversely sorted by offsets.
+        """
+        point_buffer = distance_to_buffer(distance_tolerance)
+        p_buf = Point(point).buffer(point_buffer)
+        projected_edges = []
+        projected_segments = []
+        major = self.largest_component()
+        for i in range(0, len(major)):
+            line_index = major[i]
+            line = self.geoms[line_index]
+            if line.intersects(p_buf):
+                cuts, distances = self.line_cuts[line_index]
+                for j in range(1, len(cuts)):
+                    sinx = cuts[j-1]
+                    einx = cuts[j]
+                    segment = line.coords[sinx:einx+1]
+                    ls = LineString(segment)
+                    if ls.intersects(p_buf):
+                        edge = self._edge_key(segment[0], segment[-1])
+                        offset = ls.distance(Point(point)) # no buffer
+                        projected_edges.append((edge, offset))
+                        projected_segments.append(segment)
+        result = sorted(projected_edges, key=lambda x: x[1], reverse=True)
+        return [i[0] for i in result], projected_segments
 
     def subgraph_within_box(self, bounding_box):
         """

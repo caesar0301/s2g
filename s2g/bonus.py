@@ -4,23 +4,23 @@ import matplotlib
 import numpy as np
 matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
-from shapely.geometry import Point, box, Polygon
+from shapely.geometry import Point, box, Polygon, MultiPoint
 
 __all__ = ['plot_lines', 'great_circle_dist', 'perpend_to_line',
            'bounds_overlay', 'lines_within_box', 'line_distance',
            'line_contains_point', 'lines_touch', 'point_projects_to_line',
-           'point_projects_to_points', 'cut_line', ]
+           'point_projects_to_points', 'cut_line', 'distance_to_buffer']
 
 
-def plot_lines(lines):
+def plot_lines(lines, **kwargs):
     def plot_line(ob):
         x, y = ob.xy
-        plt.plot(x, y, linewidth=1, solid_capstyle='round', zorder=1)
+        plt.plot(x, y, linewidth=1, solid_capstyle='round', zorder=1, **kwargs)
 
     for u in lines:
         if u.geom_type in ['LineString', 'LinearRing', 'Point']:
             plot_line(u)
-        elif u.geom_type is ['MultiLineString']:
+        elif u.geom_type is 'MultiLineString':
             for p in u:
                 plot_line(p)
 
@@ -45,6 +45,17 @@ def great_circle_dist(p1, p2):
         np.cos(lat0) * np.cos(lat1) * np.cos(dlon)
     c = np.arctan2(y, x)
     return EARTH_R * c
+
+
+def distance_to_buffer(distance):
+    """
+    Convert great circle distance (in small range < 1000km) to
+    Euclidean form of point buffer used by shapely.
+    :param distance: great circle distance in kilometers
+    :return: point shift in Euclidean coordinates.
+    """
+    magic_num = 1078.599717114 # km
+    return distance / magic_num
 
 
 def perpend_to_line(p1, p2, p3):
@@ -120,15 +131,9 @@ def line_contains_point(line, point, buf=10e-5):
 def lines_touch(one, other, buf=10e-5):
     """Predict the connection of two lines
     """
-    def ends_touch(one, other, buf):
-        v1 = Point(other.coords[0]).buffer(buf)
-        v2 = Point(other.coords[-1]).buffer(buf)
-        if one.intersects(v1) or one.intersects(v2):
-            return True
-        return False
-
-    return ends_touch(one, other, buf) \
-           or ends_touch(other, one, buf)
+    a = MultiPoint([one.coords[0], one.coords[-1]]).buffer(buf)
+    b = MultiPoint([other.coords[0], other.coords[-1]]).buffer(buf)
+    return one.intersects(b) or other.intersects(a)
 
 
 def point_projects_to_line(point, line):
