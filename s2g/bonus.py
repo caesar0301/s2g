@@ -139,20 +139,23 @@ def lines_touch(one, other, buf=10e-5):
 def point_projects_to_line(point, line):
     """Get the nearest point index on line
     """
-    nearest = None
-    min_dist = -1
-    for i in range(0, len(line.coords)):
-        p = line.coords[i]
-        # d = great_circle_dist(p, point)
-        d = Point(p).distance(Point(point))
-        if min_dist < 0:
-            min_dist = d
-            nearest = i
-        else:
-            if d < min_dist:
-                min_dist = d
-                nearest = i
-    return nearest
+    coords = list(line.coords)
+    p = Point(point)
+    pd = line.project(p)
+    for i in range(1, len(coords)):
+        pp = Point(coords[i-1])
+        cp = Point(coords[i])
+        prev = line.project(pp)
+        cur = line.project(cp)
+        if cur == pd:
+            return i
+        if prev == pd:
+            return i - 1
+        if prev < pd < cur:
+            pdist = p.distance(pp)
+            cdist = p.distance(cp)
+            return i-1 if pdist <= cdist else i
+    return None
 
 
 def cut_line(line, resolution, fixed_cuts=list()):
