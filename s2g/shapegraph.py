@@ -37,7 +37,7 @@ class ShapeGraph(object):
                     else:
                         logging.warning('Misc geometry type encountered and omit: {0}'.format(s.geom_type))
         else:
-            self.geoms = [line for line in geoms]
+            self.geoms = [LineString(line) for line in geoms]
         # parameters
         self.resolution = resolution
         self.coord_type = coord_type
@@ -47,8 +47,7 @@ class ShapeGraph(object):
         self.connectivity = []     # list, pairs of line indices
         self.major_components = [] # list of list, line indices
 
-        # global edge info.
-        # note: node_* are redundant.
+        # Global edge info. Note: node_* are redundant.
         # DO NOT use these to iterate over graph.
         self.node_ids = {}   # dict, node (lon, lat) to ids
         self.node_xy = {}    # dict, node ids to (lon, lat)
@@ -74,6 +73,8 @@ class ShapeGraph(object):
 
     def _register_edge(self, p1, p2, dist, raw_segment):
         assert isinstance(p1, Point) or len(p1) == 2
+        if p1 == p2:
+            return
         if p1 not in self.node_ids:
             self.node_ids[p1] = self.nodes_counter
             self.nodes_counter += 1
@@ -98,8 +99,8 @@ class ShapeGraph(object):
         # del self.node_xy[id1]
         # del self.node_xy[id2]
         edge = self._edge_key_by_nodes(id1, id2)
-        if edge in self._edges:
-            del self._edges[edge]
+        assert edge in self._edges
+        del self._edges[edge]
 
     def road_segment_from_edge(self, edge):
         """
@@ -219,17 +220,25 @@ class ShapeGraph(object):
                 e1, e2 = eline.coords[0], eline.coords[-1]
 
                 for l, p in zip([s, s, e, e], [e1, e2, s1, s2]):
-                    self._bridge_joint(l, p)
                     # assert p in self.node_ids
+                    self._bridge_joint(l, p)
 
         # assemble graph
         for edge, dist in self._edges.items():
             self.graph.add_edge(edge[0], edge[1], weight=dist)
 
+        # validate connectivity of generated graph
+        _validate_final_graph()
+
         logging.info('Graph created with {0} nodes, {1} edges'.format(
             len(self.graph.edges()), len(self.graph.nodes())))
 
         return self.graph
+
+    def _validate_final_graph(self):
+        cc = nx.algorithms.components.connected_components(self.graph)
+        mc = sorted([i for i in cc], key=len, reverse=True)
+        assert len(mc) == 1
 
     def _bridge_joint(self, line_index, point):
         """Project a point to line when they intersect within a buffer.
@@ -247,7 +256,7 @@ class ShapeGraph(object):
             ep = cuts[i]
 
             segment = LineString(coords[sp:ep + 1])
-            assert coords[ep] == segment.coords[-1]
+            # assert coords[ep] == segment.coords[-1]
             buffered_point = Point(point).buffer(self.point_buffer)
 
             if segment.intersects(buffered_point):
@@ -259,21 +268,30 @@ class ShapeGraph(object):
                 logging.debug('Insert new point: {0} at index {1} of line[{2}]' \
                               .format(point, sp + offset, line_index))
 
-                # split original segment into two parts
-                self._remove_edge(segment.coords[0], segment.coords[-1])
+                sc = segment.coords
+                op = sc[offset]
+                if op == point:
+                    continue
 
-                # replace point with projected one in distance calculation
-                bridged_segment = segment.coords[0:offset + 1]
-                self._register_edge(segment.coords[0], point,
-                                    line_distance(bridged_segment),
-                                    bridged_segment)
-                bridged_segment = segment.coords[offset:]
-                self._register_edge(point, segment.coords[-1],
-                                    line_distance(bridged_segment),
-                                    bridged_segment)
+                if offset == 0 or offset == len(sc) - 1:
+                    self._register_edge(op, point,
+                                        great_circle_dist(op, point),
+                                        [op, point])
+                else:
+                    # split original segment into two parts
+                    self._remove_edge(sc[0], segment.coords[-1])
+
+                    # replace point with projected one in distance calculation
+                    bridged_segment = sc[0:offset + 1]
+                    self._register_edge(sc[0], point,
+                                        line_distance(bridged_segment),
+                                        bridged_segment)
+                    bridged_segment = sc[offset:]
+                    self._register_edge(point, sc[-1],
+                                        line_distance(bridged_segment),
+                                        bridged_segment)
             if found:
                 break
-        return point_result
 
     def show_graph(self):
         nx.draw_networkx(self.graph, pos=self.node_xy, node_size=10,

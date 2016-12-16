@@ -178,7 +178,6 @@ def cut_line(line, resolution=1.0):
     coords = line.coords
     sampled_points = [0]
     distances = [0]
-    prev = coords[0]
     acc_dist = 0
     added = False
     for i in range(1, len(coords)):
@@ -186,7 +185,6 @@ def cut_line(line, resolution=1.0):
         if acc_dist >= resolution:
             added = True
             sampled_points.append(i)
-            prev = coords[i]
             distances.append(acc_dist)
             acc_dist = 0
         else:
@@ -194,6 +192,7 @@ def cut_line(line, resolution=1.0):
     if not added:
         sampled_points.append(i)
     distances.append(acc_dist)
+    # assert len(sampled_points) >= 2
     return sampled_points, distances
 
 
