@@ -2,6 +2,8 @@
 
 (S)hapefile (2) Graph/network converter in Python
 
+[![Build Status](https://travis-ci.org/caesar0301/python-s2g.svg?branch=master)](https://travis-ci.org/caesar0301/python-s2g)
+
 When we process GIS data, a non-trivial problem is the conversion from shape lines to graph or network data structure.
 The latter may benefit from these out-of-box graphical libraries such as [networkx](http://networkx.github.io/)
 and [igraph](http://igraph.org/python/). But the conversion is a headache to components open communities.
