@@ -4,6 +4,10 @@ import os
 import fiona
 
 from shapely.geometry import shape
+import networkx as nx
+import matplotlib
+matplotlib.use('TkAgg')
+import matplotlib.pyplot as plt
 
 # add local s2g repo
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
@@ -21,3 +25,5 @@ if __name__ == '__main__':
     sg = ShapeGraph(geoms, to_graph=False)
 
     sg = ShapeGraph(shapefile=shp, to_graph=True, resolution=0.01)
+    #nx.draw(sg.graph, pos=sg.node_xy, node_size=10, node_shape='.')
+    #plt.show()
