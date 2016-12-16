@@ -9,7 +9,7 @@ from shapely.geometry import Point, box, Polygon, MultiPoint
 __all__ = ['plot_lines', 'great_circle_dist', 'perpend_to_line',
            'bounds_overlay', 'lines_within_box', 'line_distance',
            'line_contains_point', 'lines_touch', 'point_projects_to_line',
-           'point_projects_to_points', 'cut_line', 'distance_to_buffer']
+           'cut_line', 'distance_to_buffer']
 
 
 def plot_lines(lines, **kwargs):
@@ -155,45 +155,33 @@ def point_projects_to_line(point, line):
     return nearest
 
 
-def point_projects_to_points(point, others):
-    """Get the nearest point given a group of points
-    """
-    p = Point(point)
-    nearest = None
-    min_dist = -1
-    for other in others:
-        dist = Point(other).distance(p)
-        if min_dist < 0:
-            min_dist = dist
-            nearest = other
-        else:
-            if dist < min_dist:
-                min_dist = dist
-                nearest = other
-    return nearest
-
-
-def cut_line(line, resolution=1.0):
+def cut_line(line, resolution, fixed_cuts=list()):
     assert line.geom_type == 'LineString'
     coords = line.coords
-    sampled_points = [0]
+    cuts = [0]
     distances = [0]
     acc_dist = 0
     added = False
     for i in range(1, len(coords)):
-        acc_dist += great_circle_dist(coords[i - 1], coords[i])
-        if acc_dist >= resolution:
+        if i in fixed_cuts:
             added = True
-            sampled_points.append(i)
+            cuts.append(i)
             distances.append(acc_dist)
             acc_dist = 0
         else:
-            added = False
+            acc_dist += great_circle_dist(coords[i - 1], coords[i])
+            if acc_dist >= resolution:
+                added = True
+                cuts.append(i)
+                distances.append(acc_dist)
+                acc_dist = 0
+            else:
+                added = False
     if not added:
-        sampled_points.append(i)
+        cuts.append(i)
     distances.append(acc_dist)
     # assert len(sampled_points) >= 2
-    return sampled_points, distances
+    return cuts, distances
 
 
 def cut_line_with_context(line):

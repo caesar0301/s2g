@@ -102,6 +102,36 @@ class ShapeGraph(object):
         assert edge in self._edges
         del self._edges[edge]
 
+    def _update_cut(self, lid, cut):
+        if lid not in self.line_cuts:
+            self.line_cuts[lid] = set()
+        self.line_cuts[lid].add(cut)
+
+    def _validate_intersection(self, line_index, point):
+        line = self.geoms[line_index]
+        coords = list(line.coords)
+        buffered_point = Point(point).buffer(self.point_buffer)
+        touched = False
+        if line.intersects(buffered_point):
+            touched = True
+            cut = point_projects_to_line(point, line)
+            pp = coords[cut]
+            if pp != point:
+                self._register_edge(pp, point,
+                                    great_circle_dist(pp, point),
+                                    [pp, point])
+            if 0 < cut < len(coords)-1:
+                self._update_cut(line_index, cut)
+        return touched
+
+    def _validate_pairwise_connectivity(self, ainx, binx):
+        a1, a2 = self.geoms[ainx].coords[0], self.geoms[ainx].coords[-1]
+        b1, b2 = self.geoms[binx].coords[0], self.geoms[binx].coords[-1]
+        return self._validate_intersection(ainx, b1) or \
+            self._validate_intersection(ainx, b2) or \
+            self._validate_intersection(binx, a1) or \
+            self._validate_intersection(binx, a2)
+
     def road_segment_from_edge(self, edge):
         """
         Get original road segment in point sequence which is
@@ -127,7 +157,7 @@ class ShapeGraph(object):
             for k in range(0, len(neighbors)):
                 bar.update(k+1)
                 i, j = neighbors[k]
-                if lines_touch(lines[i], lines[j]):
+                if self._validate_pairwise_connectivity(i, j):
                     graph.add_edge(i, j)
 
         # Validate lines connectivity:
@@ -159,21 +189,6 @@ class ShapeGraph(object):
         """
         return list(self.major_components[0])
 
-    def dump_major_components(self, ofile):
-        """
-        Dump lines' connectivity and major components to pickle file.
-        :param ofile: output file instance with a writer method, e.g. as open() instance
-        :return: None
-        """
-        pickle.dump((self.connected, self.connectivity, self.major_components), ofile)
-
-    def load_major_components(self, pickle_file):
-        """Load lines' connectivity and major components from pickle file.
-        """
-        self.connected, self.connectivity, major_components = \
-            pickle.load(pickle_file)
-        self.major_components = sorted(major_components, key=len, reverse=True)
-
     def to_networkx(self):
         """Convert the major component to graph of NetworkX.
         """
@@ -190,113 +205,35 @@ class ShapeGraph(object):
                 bar.update(i+1)
                 lid = major[i]
                 line = self.geoms[lid]
-                cuts, dist = cut_line(line, self.resolution)
+                coords = list(line.coords)
+                fixed_cuts = self.line_cuts[lid] if lid in self.line_cuts else set()
+                cuts, dist = cut_line(line, self.resolution, fixed_cuts)
 
                 # record cut-line info
-                self.line_cuts[lid] = (cuts, dist)
+                [self._update_cut(lid, c) for c in cuts]
 
                 # record edges info
                 for j in range(1, len(cuts)):
                     sinx = cuts[j - 1]
                     einx = cuts[j]
-                    self._register_edge(line.coords[sinx],
-                                        line.coords[einx],
+                    self._register_edge(coords[sinx],
+                                        coords[einx],
                                         dist[j],
-                                        line.coords[sinx:einx+1])
-
-        # intersection interpolation for each connected edge pair
-        logging.info('Joint interpolation for connected (touched) edges')
-        pairs = [i for i in self.connectivity \
-                 if i[0] != i[1] and i[0] in major and i[1] in major]
-
-        with progressbar.ProgressBar(max_value=len(pairs)) as bar:
-            for i in range(len(pairs)):
-                bar.update(i+1)
-                s, e = pairs[i]
-
-                sline = self.geoms[s]
-                eline = self.geoms[e]
-                s1, s2 = sline.coords[0], sline.coords[-1]
-                e1, e2 = eline.coords[0], eline.coords[-1]
-
-                for l, p in zip([s, s, e, e], [e1, e2, s1, s2]):
-                    # assert p in self.node_ids
-                    self._bridge_joint(l, p)
+                                        coords[sinx:einx+1])
 
         # assemble graph
         for edge, dist in self._edges.items():
             self.graph.add_edge(edge[0], edge[1], weight=dist)
 
         # validate connectivity of generated graph
-        _validate_final_graph()
+        cc = nx.algorithms.components.connected_components(self.graph)
+        mc = sorted([i for i in cc], key=len, reverse=True)
+        assert len(mc) == 1
 
         logging.info('Graph created with {0} nodes, {1} edges'.format(
             len(self.graph.edges()), len(self.graph.nodes())))
 
         return self.graph
-
-    def _validate_final_graph(self):
-        cc = nx.algorithms.components.connected_components(self.graph)
-        mc = sorted([i for i in cc], key=len, reverse=True)
-        assert len(mc) == 1
-
-    def _bridge_joint(self, line_index, point):
-        """Project a point to line when they intersect within a buffer.
-        In the bridge algorithm, when a cut segment intersects with given point,
-        the original cut segment is replaced by a bridge of new edges between given
-        point and end of the segment. e.g., (a -> b  joint p) ==> (a -> p -> b)
-        """
-        coords = self.geoms[line_index].coords
-        cuts, distances = self.line_cuts[line_index]
-
-        found = False
-        point_result = None
-        for i in range(1, len(cuts)):
-            sp = cuts[i - 1]
-            ep = cuts[i]
-
-            segment = LineString(coords[sp:ep + 1])
-            # assert coords[ep] == segment.coords[-1]
-            buffered_point = Point(point).buffer(self.point_buffer)
-
-            if segment.intersects(buffered_point):
-                found = True
-                offset = point_projects_to_line(point, segment)
-                point_result = sp + offset
-                # assert segment.coords[offset] == coords[sp + offset]
-
-                logging.debug('Insert new point: {0} at index {1} of line[{2}]' \
-                              .format(point, sp + offset, line_index))
-
-                sc = segment.coords
-                op = sc[offset]
-                if op == point:
-                    continue
-
-                if offset == 0 or offset == len(sc) - 1:
-                    self._register_edge(op, point,
-                                        great_circle_dist(op, point),
-                                        [op, point])
-                else:
-                    # split original segment into two parts
-                    self._remove_edge(sc[0], segment.coords[-1])
-
-                    # replace point with projected one in distance calculation
-                    bridged_segment = sc[0:offset + 1]
-                    self._register_edge(sc[0], point,
-                                        line_distance(bridged_segment),
-                                        bridged_segment)
-                    bridged_segment = sc[offset:]
-                    self._register_edge(point, sc[-1],
-                                        line_distance(bridged_segment),
-                                        bridged_segment)
-            if found:
-                break
-
-    def show_graph(self):
-        nx.draw_networkx(self.graph, pos=self.node_xy, node_size=10,
-                         with_labels=False, arrows=False)
-        plt.show()
 
     def point_projects_to_node(self, point, distance_tolerance=0.01):
         """
@@ -341,7 +278,7 @@ class ShapeGraph(object):
             line_index = major[i]
             line = self.geoms[line_index]
             if line.intersects(p_buf):
-                cuts, distances = self.line_cuts[line_index]
+                cuts = sorted(self.line_cuts[line_index])
                 for j in range(1, len(cuts)):
                     sinx = cuts[j-1]
                     einx = cuts[j]
