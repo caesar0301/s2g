@@ -1,19 +1,14 @@
 #!/usr/env/bin python
 # encoding: utf-8
-import logging
-import matplotlib
-import numpy as np
-import pickle
-import sys
-
 import fiona
+import logging
 import networkx as nx
-
-matplotlib.use('TkAgg')
-import matplotlib.pyplot as plt
-from shapely.geometry import shape, Point, LineString, box, Polygon
-from itertools import product
+import numpy as np
 import progressbar
+import sys
+from itertools import product
+from shapely.geometry import shape, Point, LineString, box, Polygon
+
 from s2g.bonus import *
 
 logging.basicConfig(stream=sys.stderr, level=logging.INFO)

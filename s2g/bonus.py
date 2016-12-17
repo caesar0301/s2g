@@ -1,9 +1,6 @@
 #!/usr/env/bin python
 # encoding: utf-8
-import matplotlib
 import numpy as np
-matplotlib.use('TkAgg')
-import matplotlib.pyplot as plt
 from shapely.geometry import Point, box, Polygon, MultiPoint
 
 __all__ = ['plot_lines', 'great_circle_dist', 'perpend_to_line',
@@ -13,6 +10,10 @@ __all__ = ['plot_lines', 'great_circle_dist', 'perpend_to_line',
 
 
 def plot_lines(lines, **kwargs):
+    import matplotlib
+    matplotlib.use('TkAgg')
+    import matplotlib.pyplot as plt
+
     def plot_line(ob):
         x, y = ob.xy
         plt.plot(x, y, linewidth=1, solid_capstyle='round', zorder=1, **kwargs)
