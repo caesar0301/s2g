@@ -290,7 +290,8 @@ class ShapeGraph(object):
                         projected_edges.append((edge, offset))
                         projected_segments.append(segment)
         result = sorted(projected_edges, key=lambda x: x[1], reverse=True)
-        return [i[0] for i in result], projected_segments
+        edges = list(set([i[0] for i in result]))
+        return edges, projected_segments
 
     def subgraph_within_box(self, bounding_box):
         """
