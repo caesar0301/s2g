@@ -34,13 +34,17 @@ class ShapeGraphCase(unittest.TestCase):
             for r in source:
                 s = shape(r['geometry'])
                 geoms.append(s)
-        cls.sg = s2g.ShapeGraph(shapefile=shp, to_graph=True, resolution=0.01)
+            cls.sg = s2g.ShapeGraph(geoms[0:50], to_graph=True, resolution=0.01)
 
     def test_registered_edges(self):
         for edge, segment in self.sg._edges.items():
             assert edge[0] <= edge[1]
-            print segment
-
+            if segment.line_index is None:
+                assert segment.line_id is None and segment.cuts is None
+            else:
+                s, e = segment.edge
+                sc, ec = segment.cuts
+                assert self.sg.node_xy[s] == self.sg.geoms[segment.line_index].coords[sc]
 
     def test_subgraph_within_box(self):
         bounding_box = box(114.572, 26.769, 114.971, 26.933)

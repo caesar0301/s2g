@@ -17,17 +17,19 @@ __all__ = ['ShapeGraph']
 
 
 class EdgeSegment(object):
-    def __init__(self, edge_key, distance, road_segment, line_index=None, line_id=None, cuts_key=None):
-        self.edge_key = edge_key
+    def __init__(self, edge, distance, road_segment, line_index=None, line_id=None, cuts=None):
+        self.edge = edge
         self.distance = distance
         self.road_segment = road_segment
         self.line_index = line_index
         self.line_id = line_id
-        self.cuts_key = cuts_key
+        self.cuts = cuts
 
     def __str__(self):
         return '{0} [{1:.3f}, line_index {2}, line_id {3}, cuts {4}]'\
-            .format(self.edge_key, self.distance, self.line_id, self.cuts_key)
+            .format(self.edge, self.distance, self.line_index,
+                    self.line_id, self.cuts)
+
 
 class ShapeGraph(object):
     def __init__(self, geoms=None, shapefile=None, to_graph=True, resolution=1.0,
@@ -66,11 +68,12 @@ class ShapeGraph(object):
                 logging.warning('Plain coordinates sequence detected, "line_id" is ignored')
             self.geoms = [LineString(line) for line in geoms]
 
-        # parameters
+        # Parameters
         self.resolution = resolution
         self.coord_type = coord_type
         self.point_buffer = point_buffer
-        # components
+
+        # Components
         self.connected = False
         self.connectivity = []     # list, pairs of line indices
         self.major_components = [] # list of list, line indices
@@ -81,6 +84,7 @@ class ShapeGraph(object):
         self.node_xy = {}    # dict, node ids to (lon, lat)
         self._edges = {}     # dict, key as self._edge_key, value as (distance,
         # road segment). For edge bridge, the original road segment is recorded.
+        self._pseudo_edgse = []
 
         # line cuts info for the largest major component
         self.line_cuts = {}  # dict, line index to line cuts. Each cut in *cuts*
@@ -130,8 +134,7 @@ class ShapeGraph(object):
             edge_cuts = (cuts[1], cuts[0]) if cuts else None
 
         if edge not in self._edges:
-            es = EdgeSegment(edge, dist, raw_segment, line_index=line_index,
-                             line_id=line_id, cuts_key=edge_cuts)
+            es = EdgeSegment(edge, dist, raw_segment, line_index, line_id, edge_cuts)
             self._edges[edge] = es
 
     def _remove_edge(self, p1, p2):
@@ -157,14 +160,10 @@ class ShapeGraph(object):
         line = self.geoms[line_index]
         coords = list(line.coords)
         buffered_point = Point(point).buffer(self.point_buffer)
-        touched = False
+        touched = None
         if line.intersects(buffered_point):
-            touched = True
             cut = point_projects_to_line(point, line)
-            pp = coords[cut]
-            if pp != point:
-                d = great_circle_dist(pp, point)
-                self._register_edge((pp, point), d, [pp, point])
+            touched = coords[cut]
             if 0 < cut < len(coords)-1:
                 self._update_cut(line_index, cut)
         return touched
@@ -172,10 +171,29 @@ class ShapeGraph(object):
     def _validate_pairwise_connectivity(self, ainx, binx):
         a1, a2 = self.geoms[ainx].coords[0], self.geoms[ainx].coords[-1]
         b1, b2 = self.geoms[binx].coords[0], self.geoms[binx].coords[-1]
-        return self._validate_intersection(ainx, b1) or \
-            self._validate_intersection(ainx, b2) or \
-            self._validate_intersection(binx, a1) or \
-            self._validate_intersection(binx, a2)
+        valid = False
+
+        touched = self._validate_intersection(ainx, b1)
+        if touched is not None:
+            self._pseudo_edgse.append([(ainx, touched), (binx, b1)])
+            valid = True
+
+        touched = self._validate_intersection(ainx, b2)
+        if touched is not None:
+            self._pseudo_edgse.append([(ainx, touched), (binx, b2)])
+            valid = True
+
+        touched = self._validate_intersection(binx, a1)
+        if touched is not None:
+            self._pseudo_edgse.append([(binx, touched), (ainx, a1)])
+            valid = True
+
+        touched = self._validate_intersection(binx, a2)
+        if touched is not None:
+            self._pseudo_edgse.append([(binx, touched), (ainx, a2)])
+            valid = True
+
+        return valid
 
     def road_segment_for_edge(self, edge):
         """
@@ -196,7 +214,9 @@ class ShapeGraph(object):
         lines = self.geoms
         L = len(lines)
         graph = nx.Graph()
+
         logging.info("Validating pair-wise line connections of raw shapefiles (total {0} lines)".format(L))
+
         neighbors = [(i, j) for i, j in product(range(0, L), range(0, L)) if j > i]
         with progressbar.ProgressBar(max_value=len(neighbors)) as bar:
             for k in range(0, len(neighbors)):
@@ -265,6 +285,14 @@ class ShapeGraph(object):
                     self._register_edge((coords[scut], coords[ecut]),
                                         dist[j], coords[scut:ecut+1],
                                         line_index, line_id, (scut, ecut))
+
+        logging.info('Adding pseudo edges to eliminate gaps between edges')
+        for pair in self._pseudo_edgse:
+            ainx, pa = pair[0]
+            binx, pb = pair[1]
+            if ainx in major and binx in major and pa != pb:
+                d = great_circle_dist(pa, pb)
+                self._register_edge((pa, pb), d, [pa, pb])
 
         # assemble graph
         for edge, segment in self._edges.items():
