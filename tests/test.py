@@ -36,6 +36,12 @@ class ShapeGraphCase(unittest.TestCase):
                 geoms.append(s)
         cls.sg = s2g.ShapeGraph(shapefile=shp, to_graph=True, resolution=0.01)
 
+    def test_registered_edges(self):
+        for edge, segment in self.sg._edges.items():
+            assert edge[0] <= edge[1]
+            print segment
+
+
     def test_subgraph_within_box(self):
         bounding_box = box(114.572, 26.769, 114.971, 26.933)
         a = time.time()

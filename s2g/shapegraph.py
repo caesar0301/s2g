@@ -16,23 +16,56 @@ logging.basicConfig(stream=sys.stderr, level=logging.INFO)
 __all__ = ['ShapeGraph']
 
 
+class EdgeSegment(object):
+    def __init__(self, edge_key, distance, road_segment, line_index=None, line_id=None, cuts_key=None):
+        self.edge_key = edge_key
+        self.distance = distance
+        self.road_segment = road_segment
+        self.line_index = line_index
+        self.line_id = line_id
+        self.cuts_key = cuts_key
+
+    def __str__(self):
+        return '{0} [{1:.3f}, line_index {2}, line_id {3}, cuts {4}]'\
+            .format(self.edge_key, self.distance, self.line_id, self.cuts_key)
+
 class ShapeGraph(object):
-    def __init__(self, geoms=None, shapefile=None, to_graph=True,
-                 resolution=1.0, coord_type='lonlat', point_buffer=10e-5):
-        # raw lines
+    def __init__(self, geoms=None, shapefile=None, to_graph=True, resolution=1.0,
+                 coord_type='lonlat', point_buffer=10e-5, line_id=None):
+        """
+        Declare and/or construct a graph from a shapefile
+        :param geoms: input1, a list of shapely::LineString objects or (lon, lat) coordinates sequence
+        :param shapefile: input2, path to shapefile; supported formats are consistent with fiona::open()
+        :param to_graph: boolean, indicates if constructing the graph during initialization
+        :param resolution: value in kilometers, the maximum road segment distance to become a graph edge
+        :param coord_type: string, unused, indicates the type of coordinates
+        :param point_buffer: value, the point tolerance (in Euclidean coordinates) to
+            perform line linking or point projection
+        :param line_id: string, the property field to represent the identify of a road, especially when
+            multiple lines consist of a whole road
+        """
         assert not (geoms is None and shapefile is None)
         assert not (geoms is not None and shapefile is not None)
+
+        self.line_id_key = line_id
+        self.line_ids = {}  # dict, line indexes to line_ids
+
         if shapefile is not None:
             self.geoms = []
             with fiona.open(shapefile) as source:
                 for r in source:
                     s = shape(r['geometry'])
                     if s.geom_type == 'LineString':
+                        if line_id is not None:
+                            self.line_ids[len(self.geoms)] = r['properties'][line_id]
                         self.geoms.append(s)
                     else:
                         logging.warning('Misc geometry type encountered and omit: {0}'.format(s.geom_type))
         else:
+            if line_id is not None:
+                logging.warning('Plain coordinates sequence detected, "line_id" is ignored')
             self.geoms = [LineString(line) for line in geoms]
+
         # parameters
         self.resolution = resolution
         self.coord_type = coord_type
@@ -46,14 +79,12 @@ class ShapeGraph(object):
         # DO NOT use these to iterate over graph.
         self.node_ids = {}   # dict, node (lon, lat) to ids
         self.node_xy = {}    # dict, node ids to (lon, lat)
-        self._edges = {}     # dict, key as self._edge_key
-        # value as (distance, road segment).
-        # For edge bridge, the original road segment is recorded.
+        self._edges = {}     # dict, key as self._edge_key, value as (distance,
+        # road segment). For edge bridge, the original road segment is recorded.
 
         # line cuts info for the largest major component
-        self.line_cuts = {}  # dict, line index to line (cuts, distances)
-        # each cut in *cuts* is a point index of line, including both ends
-        # each value in *distances* is the great circle distance of related segment
+        self.line_cuts = {}  # dict, line index to line cuts. Each cut in *cuts*
+        # is a point index of line, including both ends
         self.nodes_counter = 0
         self.graph = nx.Graph()  # generated graph data
         if to_graph:
@@ -66,21 +97,42 @@ class ShapeGraph(object):
     def _edge_key_by_nodes(self, n1, n2):
         return tuple(sorted([n1, n2]))
 
-    def _register_edge(self, p1, p2, dist, raw_segment):
-        assert isinstance(p1, Point) or len(p1) == 2
+    def _register_edge(self, edge, dist, raw_segment, line_index=None, line_id=None, cuts=None):
+        p1, p2 = edge
+        if isinstance(p1, Point) and isinstance(p2, Point):
+            p1 = list(p1.coords)[0]
+            p2 = list(p2.coords)[0]
+        elif isinstance(p1, tuple) and isinstance(p2, tuple):
+            pass
+        else:
+            raise TypeError('The edge ends should be shapely::Point or 2-tuple')
+
         if p1 == p2:
             return
+
         if p1 not in self.node_ids:
             self.node_ids[p1] = self.nodes_counter
             self.nodes_counter += 1
             self.node_xy[self.node_ids[p1]] = p1
+
         if p2 not in self.node_ids:
             self.node_ids[p2] = self.nodes_counter
             self.nodes_counter += 1
             self.node_xy[self.node_ids[p2]] = p2
-        edge = self._edge_key(p1, p2)
+
+        n1 = self.node_ids[p1]
+        n2 = self.node_ids[p2]
+        if n1 <= n2:
+            edge = (n1, n2)
+            edge_cuts = cuts if cuts else None
+        else:
+            edge = (n2, n1)
+            edge_cuts = (cuts[1], cuts[0]) if cuts else None
+
         if edge not in self._edges:
-            self._edges[edge] = (dist, raw_segment)
+            es = EdgeSegment(edge, dist, raw_segment, line_index=line_index,
+                             line_id=line_id, cuts_key=edge_cuts)
+            self._edges[edge] = es
 
     def _remove_edge(self, p1, p2):
         if p1 not in self.node_ids or p2 not in self.node_ids:
@@ -94,13 +146,12 @@ class ShapeGraph(object):
         # del self.node_xy[id1]
         # del self.node_xy[id2]
         edge = self._edge_key_by_nodes(id1, id2)
-        assert edge in self._edges
         del self._edges[edge]
 
-    def _update_cut(self, lid, cut):
-        if lid not in self.line_cuts:
-            self.line_cuts[lid] = set()
-        self.line_cuts[lid].add(cut)
+    def _update_cut(self, line_index, cut):
+        if line_index not in self.line_cuts:
+            self.line_cuts[line_index] = set()
+        self.line_cuts[line_index].add(cut)
 
     def _validate_intersection(self, line_index, point):
         line = self.geoms[line_index]
@@ -112,9 +163,8 @@ class ShapeGraph(object):
             cut = point_projects_to_line(point, line)
             pp = coords[cut]
             if pp != point:
-                self._register_edge(pp, point,
-                                    great_circle_dist(pp, point),
-                                    [pp, point])
+                d = great_circle_dist(pp, point)
+                self._register_edge((pp, point), d, [pp, point])
             if 0 < cut < len(coords)-1:
                 self._update_cut(line_index, cut)
         return touched
@@ -127,7 +177,7 @@ class ShapeGraph(object):
             self._validate_intersection(binx, a1) or \
             self._validate_intersection(binx, a2)
 
-    def road_segment_from_edge(self, edge):
+    def road_segment_for_edge(self, edge):
         """
         Get original road segment in point sequence which is
         bridged by graph edges.
@@ -136,7 +186,7 @@ class ShapeGraph(object):
         """
         edge = self._edge_key_by_nodes(edge[0], edge[1])
         assert edge in self._edges
-        return self._edges[edge][1]
+        return self._edges[edge].road_segment
 
     def gen_major_components(self):
         """
@@ -198,27 +248,27 @@ class ShapeGraph(object):
         with progressbar.ProgressBar(max_value=len(major)) as bar:
             for i in range(len(major)):
                 bar.update(i+1)
-                lid = major[i]
-                line = self.geoms[lid]
+                line_index = major[i]
+                line = self.geoms[line_index]
+                line_id = self.line_ids.get(line_index)
                 coords = list(line.coords)
-                fixed_cuts = self.line_cuts[lid] if lid in self.line_cuts else set()
-                cuts, dist = cut_line(line, self.resolution, fixed_cuts)
+                intersects = self.line_cuts[line_index] if line_index in self.line_cuts else set()
+                cuts, dist = cut_line(line, self.resolution, intersects)
 
                 # record cut-line info
-                [self._update_cut(lid, c) for c in cuts]
+                [self._update_cut(line_index, c) for c in cuts]
 
                 # record edges info
                 for j in range(1, len(cuts)):
-                    sinx = cuts[j - 1]
-                    einx = cuts[j]
-                    self._register_edge(coords[sinx],
-                                        coords[einx],
-                                        dist[j],
-                                        coords[sinx:einx+1])
+                    scut = cuts[j - 1]
+                    ecut = cuts[j]
+                    self._register_edge((coords[scut], coords[ecut]),
+                                        dist[j], coords[scut:ecut+1],
+                                        line_index, line_id, (scut, ecut))
 
         # assemble graph
-        for edge, dist in self._edges.items():
-            self.graph.add_edge(edge[0], edge[1], weight=dist)
+        for edge, segment in self._edges.items():
+            self.graph.add_edge(edge[0], edge[1], weight=segment.distance)
 
         # validate connectivity of generated graph
         cc = nx.algorithms.components.connected_components(self.graph)
