@@ -13,10 +13,10 @@ from s2g.bonus import *
 
 logging.basicConfig(stream=sys.stderr, level=logging.INFO)
 
-__all__ = ['ShapeGraph']
+__all__ = ['ShapeGraph', 'EdgeInfo']
 
 
-class EdgeSegment(object):
+class EdgeInfo(object):
     def __init__(self, edge, distance, road_segment, line_index=None, line_id=None, cuts=None):
         self.edge = edge
         self.distance = distance
@@ -26,7 +26,7 @@ class EdgeSegment(object):
         self.cuts = cuts
 
     def __str__(self):
-        return '{0} [{1:.3f}, line_index {2}, line_id {3}, cuts {4}]'\
+        return '{0} [{1:.3f}, line_index {2}, line_id {3}, cuts {4}]' \
             .format(self.edge, self.distance, self.line_index,
                     self.line_id, self.cuts)
 
@@ -44,12 +44,11 @@ class ShapeGraph(object):
         :param point_buffer: value, the point tolerance (in Euclidean coordinates) to
             perform line linking or point projection
         :param line_id: string, the property field to represent the identify of a road, especially when
-            multiple lines consist of a whole road
+            multiple lines consist of a single road
         """
         assert not (geoms is None and shapefile is None)
         assert not (geoms is not None and shapefile is not None)
 
-        self.line_id_key = line_id
         self.line_ids = {}  # dict, line indexes to line_ids
 
         if shapefile is not None:
@@ -75,15 +74,14 @@ class ShapeGraph(object):
 
         # Components
         self.connected = False
-        self.connectivity = []     # list, pairs of line indices
-        self.major_components = [] # list of list, line indices
+        self.connectivity = []  # list, pairs of line indices
+        self.major_components = []  # list of list, line indices
 
         # Global edge info. Note: node_* are redundant.
         # DO NOT use these to iterate over graph.
-        self.node_ids = {}   # dict, node (lon, lat) to ids
-        self.node_xy = {}    # dict, node ids to (lon, lat)
-        self._edges = {}     # dict, key as self._edge_key, value as (distance,
-        # road segment). For edge bridge, the original road segment is recorded.
+        self.node_ids = {}  # dict, node (lon, lat) to ids
+        self.node_xy = {}  # dict, node ids to (lon, lat)
+        self._edges = {}  # dict, key as self._edge_key, value as EdgeSegment
         self._pseudo_edgse = []
 
         # line cuts info for the largest major component
@@ -134,7 +132,7 @@ class ShapeGraph(object):
             edge_cuts = (cuts[1], cuts[0]) if cuts else None
 
         if edge not in self._edges:
-            es = EdgeSegment(edge, dist, raw_segment, line_index, line_id, edge_cuts)
+            es = EdgeInfo(edge, dist, raw_segment, line_index, line_id, edge_cuts)
             self._edges[edge] = es
 
     def _remove_edge(self, p1, p2):
@@ -164,7 +162,7 @@ class ShapeGraph(object):
         if line.intersects(buffered_point):
             cut = point_projects_to_line(point, line)
             touched = coords[cut]
-            if 0 < cut < len(coords)-1:
+            if 0 < cut < len(coords) - 1:
                 self._update_cut(line_index, cut)
         return touched
 
@@ -195,6 +193,9 @@ class ShapeGraph(object):
 
         return valid
 
+    def get_line_id(self, line_index):
+        return self.line_ids.get(line_index)
+
     def road_segment_for_edge(self, edge):
         """
         Get original road segment in point sequence which is
@@ -220,7 +221,7 @@ class ShapeGraph(object):
         neighbors = [(i, j) for i, j in product(range(0, L), range(0, L)) if j > i]
         with progressbar.ProgressBar(max_value=len(neighbors)) as bar:
             for k in range(0, len(neighbors)):
-                bar.update(k+1)
+                bar.update(k + 1)
                 i, j = neighbors[k]
                 if self._validate_pairwise_connectivity(i, j):
                     graph.add_edge(i, j)
@@ -241,7 +242,7 @@ class ShapeGraph(object):
         print("Major components statistics:")
         print("\tTotal components: {0}".format(len(self.major_components)))
         size = [len(c) for c in self.major_components]
-        print("\tComponent size: max {0}, median {1}, min {2}, average {3}"\
+        print("\tComponent size: max {0}, median {1}, min {2}, average {3}" \
               .format(np.max(size), np.median(size), np.min(size), np.average(size)))
         print("\tTop comp. sizes: {0}".format(' '.join([str(i) for i in size[0:10]])))
 
@@ -267,7 +268,7 @@ class ShapeGraph(object):
         logging.info('Cutting lines with specific resolution = {0} km'.format(self.resolution))
         with progressbar.ProgressBar(max_value=len(major)) as bar:
             for i in range(len(major)):
-                bar.update(i+1)
+                bar.update(i + 1)
                 line_index = major[i]
                 line = self.geoms[line_index]
                 line_id = self.line_ids.get(line_index)
@@ -283,7 +284,7 @@ class ShapeGraph(object):
                     scut = cuts[j - 1]
                     ecut = cuts[j]
                     self._register_edge((coords[scut], coords[ecut]),
-                                        dist[j], coords[scut:ecut+1],
+                                        dist[j], coords[scut:ecut + 1],
                                         line_index, line_id, (scut, ecut))
 
         logging.info('Adding pseudo edges to eliminate gaps between edges')
@@ -353,13 +354,13 @@ class ShapeGraph(object):
             if line.intersects(p_buf):
                 cuts = sorted(self.line_cuts[line_index])
                 for j in range(1, len(cuts)):
-                    sinx = cuts[j-1]
+                    sinx = cuts[j - 1]
                     einx = cuts[j]
-                    segment = line.coords[sinx:einx+1]
+                    segment = line.coords[sinx:einx + 1]
                     ls = LineString(segment)
                     if ls.intersects(p_buf):
                         edge = self._edge_key(segment[0], segment[-1])
-                        offset = ls.distance(Point(point)) # no buffer
+                        offset = ls.distance(Point(point))  # no buffer
                         projected_edges.append((edge, offset))
                         projected_segments.append(segment)
         result = sorted(projected_edges, key=lambda x: x[1], reverse=True)
@@ -385,6 +386,29 @@ class ShapeGraph(object):
                 nbunch.add(s)
                 nbunch.add(e)
         return self.graph.subgraph(nbunch)
+
+    def lines_within_box(self, bounding_box):
+        if isinstance(bounding_box, Polygon):
+            bbox = bounding_box
+        else:
+            bbox = box(bounding_box[0], bounding_box[1],
+                       bounding_box[2], bounding_box[3])
+
+    def edge_line_info(self, edge):
+        n1, n2 = edge
+        edge_key = self._edge_key_by_nodes(n1, n2)
+        return self._edges.get(edge_key)
+
+    def line_edge_sequence(self, line_index):
+        cuts = self.line_cuts.get(line_index)
+        edges = []
+        if cuts is not None:
+            for i in range(1, len(cuts)):
+                sn = self.node_ids[cuts[i - 1]]
+                en = self.node_ids[cuts[i]]
+                edge = (sn, en)
+                edges.append(edge)
+        return edges
 
 
 if __name__ == '__main__':
