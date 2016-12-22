@@ -96,10 +96,15 @@ class ShapeGraph(object):
             self.gen_major_components()
             self.to_networkx()
 
-    def _edge_key(self, p1, p2):
+    def edge_key(self, p1, p2=None):
+        if p2 is None:
+            p1, p2 = p1
         return tuple(sorted([self.node_ids[p1], self.node_ids[p2]]))
 
-    def _edge_key_by_nodes(self, n1, n2):
+    @staticmethod
+    def edge_key_nodes(n1, n2=None):
+        if n2 is None:
+            n1, n2 = n1
         return tuple(sorted([n1, n2]))
 
     def _register_edge(self, edge, dist, raw_segment, line_index=None, cuts=None):
@@ -149,7 +154,7 @@ class ShapeGraph(object):
         # del self.node_ids[p2]
         # del self.node_xy[id1]
         # del self.node_xy[id2]
-        edge = self._edge_key_by_nodes(id1, id2)
+        edge = self.edge_key_nodes(id1, id2)
         del self._edges[edge]
 
     def _update_cut(self, line_index, cut):
@@ -157,7 +162,14 @@ class ShapeGraph(object):
             self.line_cuts[line_index] = set()
         self.line_cuts[line_index].add(cut)
 
-    def _validate_intersection(self, line_index, point):
+    def validate_intersection(self, line_index, point):
+        """
+        Validate the intersection between given line and point.
+        A spatial tolerance is considered to confirm the validation.
+        :param line_index: index of specific line
+        :param point: validated point
+        :return: coordinates of intersected point on line, otherwise None
+        """
         line = self.geoms[line_index]
         coords = list(line.coords)
         buffered_point = Point(point).buffer(self.point_buffer)
@@ -169,27 +181,36 @@ class ShapeGraph(object):
                 self._update_cut(line_index, cut)
         return touched
 
-    def _validate_pairwise_connectivity(self, ainx, binx):
+    def validate_pairwise_connectivity(self, ainx, binx):
+        """
+        Validate the connectivity between two lines.
+
+        In this algorithm, line A's connectivity to line B is confirmed
+        by the validation of either of A's ends intersecting with B.
+        :param ainx: index of line A
+        :param binx: index of line B
+        :return: boolean
+        """
         a1, a2 = self.geoms[ainx].coords[0], self.geoms[ainx].coords[-1]
         b1, b2 = self.geoms[binx].coords[0], self.geoms[binx].coords[-1]
         valid = False
 
-        touched = self._validate_intersection(ainx, b1)
+        touched = self.validate_intersection(ainx, b1)
         if touched is not None:
             self._pseudo_edgse.append([(ainx, touched), (binx, b1)])
             valid = True
 
-        touched = self._validate_intersection(ainx, b2)
+        touched = self.validate_intersection(ainx, b2)
         if touched is not None:
             self._pseudo_edgse.append([(ainx, touched), (binx, b2)])
             valid = True
 
-        touched = self._validate_intersection(binx, a1)
+        touched = self.validate_intersection(binx, a1)
         if touched is not None:
             self._pseudo_edgse.append([(binx, touched), (ainx, a1)])
             valid = True
 
-        touched = self._validate_intersection(binx, a2)
+        touched = self.validate_intersection(binx, a2)
         if touched is not None:
             self._pseudo_edgse.append([(binx, touched), (ainx, a2)])
             valid = True
@@ -197,6 +218,11 @@ class ShapeGraph(object):
         return valid
 
     def get_line_props(self, line_index):
+        """
+        Get properties of specific line.
+        :param line_index: the index of lines in input
+        :return: dict, property names and values
+        """
         return self.line_props.get(line_index)
 
     def road_segment_for_edge(self, edge):
@@ -206,7 +232,7 @@ class ShapeGraph(object):
         :param edge: a tuple of two node ids
         :return: the point sequence of raw road segment
         """
-        edge = self._edge_key_by_nodes(edge[0], edge[1])
+        edge = self.edge_key_nodes(edge[0], edge[1])
         assert edge in self._edges
         return self._edges[edge].road_segment
 
@@ -226,7 +252,7 @@ class ShapeGraph(object):
             for k in range(0, len(neighbors)):
                 bar.update(k + 1)
                 i, j = neighbors[k]
-                if self._validate_pairwise_connectivity(i, j):
+                if self.validate_pairwise_connectivity(i, j):
                     graph.add_edge(i, j)
 
         # Validate lines connectivity:
@@ -264,7 +290,7 @@ class ShapeGraph(object):
         if len(self.major_components) is None:
             self.gen_major_components()
 
-        major = list(self.major_components[0])
+        major = self.largest_component()
         logging.info('Processing the largest component with {0} lines'.format(len(major)))
 
         # do line cutting
@@ -361,7 +387,7 @@ class ShapeGraph(object):
                     segment = line.coords[sinx:einx + 1]
                     ls = LineString(segment)
                     if ls.intersects(p_buf):
-                        edge = self._edge_key(segment[0], segment[-1])
+                        edge = self.edge_key(segment[0], segment[-1])
                         offset = ls.distance(Point(point))  # no buffer
                         projected_edges.append((edge, offset))
                         projected_segments.append(segment)
@@ -371,7 +397,7 @@ class ShapeGraph(object):
 
     def subgraph_within_box(self, bounding_box):
         """
-        Extract a subgraph bouneded by a box.
+        Extract a subgraph bounded by a box.
         :param bounding_box: the bounding coordinates in
             (minx, miny, maxx, maxy) or a Polygon instance
         :return: a subgraph of nx.Graph
@@ -396,18 +422,33 @@ class ShapeGraph(object):
             bbox = box(bounding_box[0], bounding_box[1],
                        bounding_box[2], bounding_box[3])
 
-    def edge_line_info(self, edge):
+    def edge_info(self, edge):
+        """
+        Get information of road segment attached to specifc edge
+        :param edge: tuple, of edge nodes
+        :return: instance of EdgeInfo
+        """
         n1, n2 = edge
-        edge_key = self._edge_key_by_nodes(n1, n2)
+        edge_key = self.edge_key_nodes(n1, n2)
         return self._edges.get(edge_key)
 
     def line_edge_sequence(self, line_index):
-        cuts = self.line_cuts.get(line_index)
+        """
+        Get a sequence of edges belonging to specific line
+        :param line_index: the index of specific line in input
+        :return: list, of 2-tuple edges
+
+        Note: the resulted edges keep their order along line coordinates sequence.
+        In other words, the 2-tuple edge does NOT assure uniqueness as returned by
+        self.edge_key or self.edge_key_nodes.
+        """
+        cuts = list(self.line_cuts.get(line_index))
+        coords = list(self.geoms[line_index].coords)
         edges = []
         if cuts is not None:
             for i in range(1, len(cuts)):
-                sn = self.node_ids[cuts[i - 1]]
-                en = self.node_ids[cuts[i]]
+                sn = self.node_ids[coords[cuts[i - 1]]]
+                en = self.node_ids[coords[cuts[i]]]
                 edge = (sn, en)
                 edges.append(edge)
         return edges

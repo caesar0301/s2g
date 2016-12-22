@@ -58,6 +58,17 @@ class ShapeGraphCase(unittest.TestCase):
                 props = self.sg.get_line_props(segment.line_index)
                 assert 'osm_id' in props
 
+    def test_edge_info(self):
+        info = self.sg.edge_info((0, 1))
+        assert info.line_index == 0
+        assert info.cuts == (0, 1)
+
+    def test_line_edge_sequence(self):
+        for line_index in self.sg.largest_component():
+            edges = self.sg.line_edge_sequence(line_index)
+            for edge in edges:
+                assert self.sg.edge_key_nodes(edge[0], edge[1]) in self.sg.graph.edges()
+
     def test_subgraph_within_box(self):
         bounding_box = box(114.572, 26.769, 114.971, 26.933)
         a = time.time()
