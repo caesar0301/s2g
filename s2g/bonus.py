@@ -3,8 +3,8 @@
 import numpy as np
 from shapely.geometry import Point, box, Polygon, MultiPoint
 
-__all__ = ['plot_lines', 'great_circle_dist', 'perpend_to_line',
-           'bounds_overlay', 'lines_within_box', 'line_distance',
+__all__ = ['plot_lines', 'great_circle_dist', 'gcd', 'perpend_to_line',
+           'box_overlay', 'bounded_segments', 'line_distance',
            'line_contains_point', 'lines_touch', 'point_projects_to_line',
            'cut_line', 'distance_to_buffer']
 
@@ -47,6 +47,9 @@ def great_circle_dist(p1, p2):
     return EARTH_R * c
 
 
+gcd = great_circle_dist
+
+
 def distance_to_buffer(distance):
     """
     Convert great circle distance (in small range < 1000km) to
@@ -54,7 +57,7 @@ def distance_to_buffer(distance):
     :param distance: great circle distance in kilometers
     :return: point shift in Euclidean coordinates.
     """
-    magic_num = 1078.599717114 # km
+    magic_num = 1078.599717114  # km
     return distance / magic_num
 
 
@@ -79,7 +82,7 @@ def perpend_to_line(p1, p2, p3):
     return x, y
 
 
-def bounds_overlay(a, b):
+def box_overlay(a, b):
     """Checking overlay by bounds (minx, miny, maxx, maxy)
     """
     # for i, j in product([0, 2], [1, 3]):
@@ -92,7 +95,7 @@ def bounds_overlay(a, b):
     return bbox1.intersects(bbox2)
 
 
-def lines_within_box(lines, bounding_box, cut_segment=True):
+def bounded_segments(lines, bounding_box, cut_segment=True):
     """
     Extract the bounded segments from a list of lines
     :param lines: a list of LineString

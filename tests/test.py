@@ -32,7 +32,7 @@ class ShapeGraphCase(unittest.TestCase):
         # test shapefile input
         cls.shp = os.path.join(os.path.dirname(__file__), '../data/campus.shp')
         G1 = s2g.ShapeGraph(shapefile=cls.shp, to_graph=True, resolution=0.01,
-                            properties=['osm_id'], geom_count=500)
+                            properties=['osm_id'], geom_count=100)
         cls.sg = G1
 
     def test_coords_input(self):
@@ -131,7 +131,13 @@ class BonusCase(unittest.TestCase):
                 s = shape(r['geometry'])
                 self.geoms.append(s)
 
-    def test_lines_within_box(self):
+    def test_gcd(self):
+        p1 = (114.83299055, 26.8892277)
+        p2 = (121.428387, 31.027371)
+        assert s2g.great_circle_dist(p1, p2) == s2g.gcd(p1, p2)
+        assert s2g.great_circle_dist(p1, p1) == 0
+
+    def test_bounded_segments(self):
         pass
 
     def tearDown(self):
