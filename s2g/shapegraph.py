@@ -62,8 +62,9 @@ class ShapeGraph(object):
         assert not (geoms is None and shapefile is None)
         assert not (geoms is not None and shapefile is not None)
 
-        self.geoms = []
-        self._line_props = {}  # dict, line indexes to properties
+        self.geoms = []  # all input lines
+        self._line_props = {}  # dict, line indexes to properties, all input lines
+        self._line_cuts = {}  # dict, line index to cuts (point indexes) set, for major component and more
 
         if shapefile is not None:
             with fiona.open(shapefile) as source:
@@ -97,15 +98,13 @@ class ShapeGraph(object):
 
         # Global edge info. Note: node_* are redundant.
         # DO NOT use these to iterate over graph.
-        self.node_ids = {}  # dict, node (lon, lat) to ids
-        self.node_xy = {}  # dict, node ids to (lon, lat)
-        self._edges = {}  # dict, key as self._edge_key, value as EdgeSegment
-        self._pseudo_edges = []
-
-        # line cuts info for the largest major component
-        self._line_cuts = {}  # dict, line index to cuts (point indexes) set
+        self.node_ids = {}  # dict, node (lon, lat) to ids, for major component
+        self.node_xy = {}  # dict, node ids to (lon, lat), for major component
+        self._edges = {}  # dict, key as self._edge_key, value as EdgeSegment, for major component
+        self._pseudo_edges = []  # for major component and more
         self.nodes_counter = 0
         self.graph = nx.Graph()  # generated graph data
+
         if to_graph:
             self.gen_major_components()
             self.to_networkx()
@@ -276,9 +275,9 @@ class ShapeGraph(object):
 
         return self.connected, self.connectivity, self.major_components
 
-    def largest_component(self):
+    def major_component(self):
         """
-        Get the largest connected component.
+        Get the largest self-connected component.
         :return: a list of lines consists of the largest component
         """
         if len(self.major_components) > 0:
@@ -292,7 +291,7 @@ class ShapeGraph(object):
         if len(self.major_components) is None:
             self.gen_major_components()
 
-        major = self.largest_component()
+        major = self.major_component()
         if not major:
             return
 
@@ -380,7 +379,7 @@ class ShapeGraph(object):
         p_buf = Point(point).buffer(point_buffer)
         projected_edges = []
         projected_segments = []
-        major = self.largest_component()
+        major = self.major_component()
         for i in range(0, len(major)):
             line_index = major[i]
             line = self.geoms[line_index]
@@ -448,7 +447,7 @@ class ShapeGraph(object):
             index=line_index,
             coords=list(self.geoms[line_index].coords),
             props=self._line_props.get(line_index),
-            is_major=line_index in self.largest_component(),
+            is_major=line_index in self.major_component(),
             cuts=self.line_cuts(line_index)
         )
 
@@ -461,6 +460,17 @@ class ShapeGraph(object):
         n1, n2 = edge
         edge_key = self.edge_key_nodes(n1, n2)
         return self._edges.get(edge_key)
+
+    def major_lines_info(self):
+        """
+        Return the info of lines in the major component
+        :return: dict, line index to info
+        """
+        result = {}
+        major = self.major_component()
+        for line_index in major:
+            result[line_index] = self.line_info(line_index)
+        return result
 
     def line_edge_sequence(self, line_index):
         """

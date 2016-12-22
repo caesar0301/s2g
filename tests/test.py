@@ -73,8 +73,16 @@ class ShapeGraphCase(unittest.TestCase):
         info = self.sg.line_info(0)
         assert 'osm_id' in info.props
 
+    def test_major_lines_info(self):
+        lines_info = self.sg.major_lines_info()
+        major = self.sg.major_component()
+        for line_index, info in lines_info.items():
+            assert info.is_major is True
+            assert info.index in major
+        assert len(lines_info) == len(major)
+
     def test_line_edge_sequence(self):
-        for line_index in self.sg.largest_component():
+        for line_index in self.sg.major_component():
             edges = self.sg.line_edge_sequence(line_index)
             for edge in edges:
                 ekey = self.sg.edge_key_nodes(edge[0], edge[1])
