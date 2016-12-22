@@ -103,7 +103,7 @@ class ShapeGraph(object):
         self._pseudo_edges = []
 
         # line cuts info for the largest major component
-        self.line_cuts = {}  # dict, line index to cuts (point indexes) set
+        self._line_cuts = {}  # dict, line index to cuts (point indexes) set
         self.nodes_counter = 0
         self.graph = nx.Graph()  # generated graph data
         if to_graph:
@@ -122,42 +122,42 @@ class ShapeGraph(object):
             node1, node2 = n1
         return tuple(sorted([node1, node2]))
 
-    def _register_edge(self, edge, dist, raw_segment, line_index=None, cuts=None):
-        p1, p2 = edge
-        if isinstance(p1, Point) and isinstance(p2, Point):
-            p1 = list(p1.coords)[0]
-            p2 = list(p2.coords)[0]
-        elif isinstance(p1, tuple) and isinstance(p2, tuple):
+    def _register_node(self, p):
+        if isinstance(p, Point):
+            p = list(p.coords)[0]
+        elif isinstance(p, tuple):
             pass
         else:
-            raise TypeError('The edge ends should be shapely::Point or 2-tuple')
+            raise TypeError('The point should be shapely::Point or a 2-tuple')
 
-        if p1 == p2:
-            return False
-
-        if p1 not in self.node_ids:
-            self.node_ids[p1] = self.nodes_counter
+        if p not in self.node_ids:
+            nid = self.nodes_counter
+            self.node_ids[p] = nid
+            self.node_xy[nid] = p
             self.nodes_counter += 1
-            self.node_xy[self.node_ids[p1]] = p1
 
-        if p2 not in self.node_ids:
-            self.node_ids[p2] = self.nodes_counter
-            self.nodes_counter += 1
-            self.node_xy[self.node_ids[p2]] = p2
+        return self.node_ids[p]
 
-        n1 = self.node_ids[p1]
-        n2 = self.node_ids[p2]
-        if n1 <= n2:
+    def _register_edge(self, edge, dist, raw_segment, line_index=None, cuts=None):
+        n1 = self._register_node(edge[0])
+        n2 = self._register_node(edge[1])
+
+        if n1 < n2:
             edge = (n1, n2)
             edge_cuts = tuple(cuts) if cuts else None
-        else:
+        elif n1 > n2:
             edge = (n2, n1)
             edge_cuts = (cuts[1], cuts[0]) if cuts else None
+        else:
+            return None
+
+        if edge[0] == 1186 and edge[1] == 1206:
+            print 'bingo', line_index, cuts, edge
 
         if edge not in self._edges:
             es = EdgeInfo(edge, dist, raw_segment, line_index, edge_cuts)
             self._edges[edge] = es
-        return True
+        return edge
 
     def _remove_edge(self, p1, p2):
         if p1 not in self.node_ids or p2 not in self.node_ids:
@@ -174,9 +174,9 @@ class ShapeGraph(object):
         del self._edges[edge]
 
     def _update_cut(self, line_index, cut):
-        if line_index not in self.line_cuts:
-            self.line_cuts[line_index] = set()
-        self.line_cuts[line_index].add(cut)
+        if line_index not in self._line_cuts:
+            self._line_cuts[line_index] = set()
+        self._line_cuts[line_index].add(cut)
 
     def validate_intersection(self, line_index, point):
         """
@@ -193,8 +193,7 @@ class ShapeGraph(object):
         if line.intersects(buffered_point):
             cut = point_projects_to_line(point, line)
             touched = coords[cut]
-            if 0 < cut < len(coords) - 1:
-                self._update_cut(line_index, cut)
+            self._update_cut(line_index, cut)
         return touched
 
     def validate_pairwise_connectivity(self, ainx, binx):
@@ -267,7 +266,10 @@ class ShapeGraph(object):
         # statistics
         print("Major components statistics:")
         print("\tTotal components: {0}".format(len(self.major_components)))
-        size = [len(c) for c in self.major_components]
+        if len(self.major_components) == 0:
+            size = [0]
+        else:
+            size = [len(c) for c in self.major_components]
         print("\tComponent size: max {0}, median {1}, min {2}, average {3}" \
               .format(np.max(size), np.median(size), np.min(size), np.average(size)))
         print("\tTop comp. sizes: {0}".format(' '.join([str(i) for i in size[0:10]])))
@@ -279,7 +281,10 @@ class ShapeGraph(object):
         Get the largest connected component.
         :return: a list of lines consists of the largest component
         """
-        return list(self.major_components[0])
+        if len(self.major_components) > 0:
+            return list(self.major_components[0])
+        else:
+            return None
 
     def to_networkx(self):
         """Convert the major component to graph of NetworkX.
@@ -288,6 +293,9 @@ class ShapeGraph(object):
             self.gen_major_components()
 
         major = self.largest_component()
+        if not major:
+            return
+
         logging.info('Processing the largest component with {0} lines'.format(len(major)))
 
         # do line cutting
@@ -298,7 +306,7 @@ class ShapeGraph(object):
                 line_index = major[i]
                 line = self.geoms[line_index]
                 coords = list(line.coords)
-                intersects = self.line_cuts.get(line_index)
+                intersects = self.line_cuts(line_index)
                 cuts, dist = cut_line(line, self.resolution, intersects if intersects else set())
 
                 # record cut-line info
@@ -311,8 +319,6 @@ class ShapeGraph(object):
                     self._register_edge((coords[scut], coords[ecut]),
                                         dist[j], coords[scut:ecut + 1],
                                         line_index, (scut, ecut))
-
-                assert len(self.line_edge_sequence(line_index)) == len(cuts)-1
 
         logging.info('Adding pseudo edges to eliminate gaps between edges')
         for pair in self._pseudo_edges:
@@ -379,7 +385,9 @@ class ShapeGraph(object):
             line_index = major[i]
             line = self.geoms[line_index]
             if line.intersects(p_buf):
-                cuts = list(self.line_cuts[line_index])
+                cuts = self.line_cuts(line_index)
+                if cuts is None:
+                    continue
                 for j in range(1, len(cuts)):
                     sinx = cuts[j - 1]
                     einx = cuts[j]
@@ -441,7 +449,7 @@ class ShapeGraph(object):
             coords=list(self.geoms[line_index].coords),
             props=self._line_props.get(line_index),
             is_major=line_index in self.largest_component(),
-            cuts=list(self.line_cuts.get(line_index))
+            cuts=self.line_cuts(line_index)
         )
 
     def edge_info(self, edge):
@@ -464,7 +472,7 @@ class ShapeGraph(object):
         In other words, the 2-tuple edge does NOT assure uniqueness as returned by
         self.edge_key or self.edge_key_nodes.
         """
-        cuts = list(self.line_cuts.get(line_index))
+        cuts = self.line_cuts(line_index)
         coords = list(self.geoms[line_index].coords)
         edges = []
         if cuts is not None:
@@ -482,6 +490,17 @@ class ShapeGraph(object):
         :return: dict, property names and values
         """
         return self._line_props.get(line_index)
+
+    def line_cuts(self, line_index):
+        """
+        Get cut sequence of specific line
+        :param line_index: the index of line in input
+        :return: list, of cut indexes of line
+        """
+        if line_index in self._line_cuts:
+            return sorted(self._line_cuts.get(line_index))
+        else:
+            return None
 
     def edge_line_segment(self, edge):
         """
