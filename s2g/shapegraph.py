@@ -17,23 +17,22 @@ __all__ = ['ShapeGraph', 'EdgeInfo']
 
 
 class EdgeInfo(object):
-    def __init__(self, edge, distance, road_segment, line_index=None, line_id=None, cuts=None):
+    def __init__(self, edge, distance, road_segment, line_index=None, cuts=None):
         self.edge = edge
         self.distance = distance
         self.road_segment = road_segment
         self.line_index = line_index
-        self.line_id = line_id
         self.cuts = cuts
 
     def __str__(self):
-        return '{0} [{1:.3f}, line_index {2}, line_id {3}, cuts {4}]' \
-            .format(self.edge, self.distance, self.line_index,
-                    self.line_id, self.cuts)
+        return '{0} [{1:.3f}, line_index {2}, cuts {3}]' \
+            .format(self.edge, self.distance, self.line_index, self.cuts)
 
 
 class ShapeGraph(object):
     def __init__(self, geoms=None, shapefile=None, to_graph=True, resolution=1.0,
-                 coord_type='lonlat', point_buffer=10e-5, line_id=None):
+                 coord_type='lonlat', point_buffer=10e-5, properties=list(),
+                 geom_count=None):
         """
         Declare and/or construct a graph from a shapefile
         :param geoms: input1, a list of shapely::LineString objects or (lon, lat) coordinates sequence
@@ -43,29 +42,33 @@ class ShapeGraph(object):
         :param coord_type: string, unused, indicates the type of coordinates
         :param point_buffer: value, the point tolerance (in Euclidean coordinates) to
             perform line linking or point projection
-        :param line_id: string, the property field to represent the identify of a road, especially when
-            multiple lines consist of a single road
+        :param properties: list, the property fields of a road
         """
         assert not (geoms is None and shapefile is None)
         assert not (geoms is not None and shapefile is not None)
 
-        self.line_ids = {}  # dict, line indexes to line_ids
+        self.geoms = []
+        self.line_props = {}  # dict, line indexes to properties
 
         if shapefile is not None:
-            self.geoms = []
             with fiona.open(shapefile) as source:
                 for r in source:
                     s = shape(r['geometry'])
                     if s.geom_type == 'LineString':
-                        if line_id is not None:
-                            self.line_ids[len(self.geoms)] = r['properties'][line_id]
+                        props = {}
+                        for p in properties:
+                            props[p] = r['properties'][p]
+                        self.line_props[len(self.geoms)] = props
                         self.geoms.append(s)
+                        # for debugging
+                        if geom_count is not None and len(self.geoms) == geom_count:
+                            break
                     else:
                         logging.warning('Misc geometry type encountered and omit: {0}'.format(s.geom_type))
         else:
-            if line_id is not None:
-                logging.warning('Plain coordinates sequence detected, "line_id" is ignored')
-            self.geoms = [LineString(line) for line in geoms]
+            if len(properties):
+                logging.warning('Plain coordinates sequence detected, properties are ignored: {0}'.format(properties))
+            [self.geoms.append(LineString(i)) for i in geoms]
 
         # Parameters
         self.resolution = resolution
@@ -99,7 +102,7 @@ class ShapeGraph(object):
     def _edge_key_by_nodes(self, n1, n2):
         return tuple(sorted([n1, n2]))
 
-    def _register_edge(self, edge, dist, raw_segment, line_index=None, line_id=None, cuts=None):
+    def _register_edge(self, edge, dist, raw_segment, line_index=None, cuts=None):
         p1, p2 = edge
         if isinstance(p1, Point) and isinstance(p2, Point):
             p1 = list(p1.coords)[0]
@@ -132,7 +135,7 @@ class ShapeGraph(object):
             edge_cuts = (cuts[1], cuts[0]) if cuts else None
 
         if edge not in self._edges:
-            es = EdgeInfo(edge, dist, raw_segment, line_index, line_id, edge_cuts)
+            es = EdgeInfo(edge, dist, raw_segment, line_index, edge_cuts)
             self._edges[edge] = es
 
     def _remove_edge(self, p1, p2):
@@ -193,8 +196,8 @@ class ShapeGraph(object):
 
         return valid
 
-    def get_line_id(self, line_index):
-        return self.line_ids.get(line_index)
+    def get_line_props(self, line_index):
+        return self.line_props.get(line_index)
 
     def road_segment_for_edge(self, edge):
         """
@@ -271,7 +274,6 @@ class ShapeGraph(object):
                 bar.update(i + 1)
                 line_index = major[i]
                 line = self.geoms[line_index]
-                line_id = self.line_ids.get(line_index)
                 coords = list(line.coords)
                 intersects = self.line_cuts[line_index] if line_index in self.line_cuts else set()
                 cuts, dist = cut_line(line, self.resolution, intersects)
@@ -285,7 +287,7 @@ class ShapeGraph(object):
                     ecut = cuts[j]
                     self._register_edge((coords[scut], coords[ecut]),
                                         dist[j], coords[scut:ecut + 1],
-                                        line_index, line_id, (scut, ecut))
+                                        line_index, (scut, ecut))
 
         logging.info('Adding pseudo edges to eliminate gaps between edges')
         for pair in self._pseudo_edgse:

@@ -28,23 +28,35 @@ class ShapeGraphCase(unittest.TestCase):
             and store the result as class variable
         """
         super(ShapeGraphCase, cls).setUpClass()
+        # test shapefile input
         shp = os.path.join(os.path.dirname(__file__), '../data/campus.shp')
+        G1 = s2g.ShapeGraph(shapefile=shp, to_graph=True, resolution=0.01,
+                            properties=['osm_id'], geom_count=50)
+        # test line or coordinates list input
+        geoms = []
         with fiona.open(shp) as source:
-            geoms = []
             for r in source:
                 s = shape(r['geometry'])
                 geoms.append(s)
-            cls.sg = s2g.ShapeGraph(geoms[0:50], to_graph=True, resolution=0.01)
+        G2 = s2g.ShapeGraph(geoms[0:50], to_graph=True, resolution=0.01,
+                            properties=['osm_id'])
+        cls.sg = G1
 
     def test_registered_edges(self):
         for edge, segment in self.sg._edges.items():
             assert edge[0] <= edge[1]
             if segment.line_index is None:
-                assert segment.line_id is None and segment.cuts is None
+                assert segment.cuts is None
             else:
                 s, e = segment.edge
                 sc, ec = segment.cuts
                 assert self.sg.node_xy[s] == self.sg.geoms[segment.line_index].coords[sc]
+
+    def test_edge_properties(self):
+        for edge, segment in self.sg._edges.items():
+            if segment.line_index is not None:
+                props = self.sg.get_line_props(segment.line_index)
+                assert 'osm_id' in props
 
     def test_subgraph_within_box(self):
         bounding_box = box(114.572, 26.769, 114.971, 26.933)
