@@ -64,3 +64,4 @@ Dive into [source doc](https://github.com/caesar0301/python-s2g/blob/master/s2g/
 
 * [shp2graph](https://cran.r-project.org/web/packages/shp2graph/index.html) in R by Binbin Lu, as well as [his talk](http://web.warwick.ac.uk/statsdept/user2011/TalkSlides/Contributed/17Aug_1600_FocusIV_2-Geospatial_1-Lu.pdf) on useR! 2011
 * [A Tutorial on Topology Correction of Shapefiles Using GRASS](http://xiaming.me/posts/2015/08/29/a-tutorial-on-topology-correction-of-shapefiles-using-grass/)
+* [Why do I make s2g](http://xiaming.me/posts/2016/12/18/process-gis-shapefile-with-graph-tools/)
