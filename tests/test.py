@@ -1,16 +1,13 @@
 #!/usr/bin/env python
-import matplotlib
+import matplotlib.pyplot as plt
 import os
 import sys
 import time
 import unittest
 
 import fiona
-from shapely.geometry import shape, box, MultiLineString
 import networkx as nx
-
-matplotlib.use('TkAgg')
-import matplotlib.pyplot as plt
+from shapely.geometry import shape, box, MultiLineString
 
 # add local s2g repo
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
@@ -18,7 +15,6 @@ import s2g
 
 
 class ShapeGraphCase(unittest.TestCase):
-
     def setUp(self):
         self.sg = ShapeGraphCase.sg
         self.show_plots = False
@@ -93,9 +89,9 @@ class ShapeGraphCase(unittest.TestCase):
         a = time.time()
         subgraph = self.sg.subgraph_within_box(bounding_box)
         print time.time() - a
-        plt.figure()
-        nx.draw(subgraph, pos=self.sg.node_xy, node_size=50)
         if self.show_plots:
+            plt.figure()
+            nx.draw(subgraph, pos=self.sg.node_xy, node_size=50)
             plt.show()
 
     def test_lines_within_box(self):
@@ -111,15 +107,15 @@ class ShapeGraphCase(unittest.TestCase):
         edges, segments = self.sg.point_projects_to_edges(p, 0.01)
         print time.time() - a
 
-        plt.figure()
-        s2g.plot_lines(MultiLineString(segments), color='orange')  # original roads
-        for i in range(0, len(edges)):
-            s, e = edges[i]
-            sxy = self.sg.node_xy[s]
-            exy = self.sg.node_xy[e]
-            plt.plot([sxy[0], exy[0]], [sxy[1], exy[1]], color='green') # graph edges
-        plt.plot(p[0], p[1], color='red', markersize=12, marker='o') # bridges
         if self.show_plots:
+            plt.figure()
+            s2g.plot_lines(MultiLineString(segments), color='orange')  # original roads
+            for i in range(0, len(edges)):
+                s, e = edges[i]
+                sxy = self.sg.node_xy[s]
+                exy = self.sg.node_xy[e]
+                plt.plot([sxy[0], exy[0]], [sxy[1], exy[1]], color='green')  # graph edges
+            plt.plot(p[0], p[1], color='red', markersize=12, marker='o')  # bridges
             plt.show()
 
     def test_edge_line_segment(self):
@@ -134,7 +130,6 @@ class BonusCase(unittest.TestCase):
         shp = os.path.join(os.path.dirname(__file__), '../data/campus.shp')
         self.geoms = []
         with fiona.open(shp) as source:
-
             for r in source:
                 s = shape(r['geometry'])
                 self.geoms.append(s)
