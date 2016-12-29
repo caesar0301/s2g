@@ -47,7 +47,7 @@ class LineInfo(object):
 class ShapeGraph(object):
     def __init__(self, geoms=None, shapefile=None, to_graph=True, resolution=1.0,
                  coord_type='lonlat', point_buffer=10e-5, properties=list(),
-                 geom_count=None):
+                 geom_count=None, direct_graph=False):
         """
         Declare and/or construct a graph from a shapefile
         :param geoms: input1, a list of shapely::LineString objects or (lon, lat) coordinates sequence
@@ -90,6 +90,7 @@ class ShapeGraph(object):
         self.resolution = resolution
         self.coord_type = coord_type
         self.point_buffer = point_buffer
+        self.direct_graph = direct_graph
 
         # Components
         self.connected = False
@@ -103,7 +104,7 @@ class ShapeGraph(object):
         self._edges = {}  # dict, key as self._edge_key, value as EdgeSegment, for major component
         self._pseudo_edges = []  # for major component and more
         self.nodes_counter = 0
-        self.graph = nx.Graph()  # generated graph data
+        self.graph = nx.Graph() if not direct_graph else nx.DiGraph()  # generated graph data
 
         if to_graph:
             self.gen_major_components()
@@ -112,14 +113,19 @@ class ShapeGraph(object):
     def edge_key(self, p1, p2=None):
         if p2 is None:
             p1, p2 = p1
-        return tuple(sorted([self.node_ids[p1], self.node_ids[p2]]))
+        if self.direct_graph:
+            return tuple([self.node_ids[p1], self.node_ids[p2]])
+        else:
+            return tuple(sorted([self.node_ids[p1], self.node_ids[p2]]))
 
-    @staticmethod
-    def edge_key_nodes(n1, n2=None):
+    def edge_key_nodes(self, n1, n2=None):
         node1, node2 = (n1, n2)
         if n2 is None:
             node1, node2 = n1
-        return tuple(sorted([node1, node2]))
+        if self.direct_graph:
+            return tuple([node1, node2])
+        else:
+            return tuple(sorted([node1, node2]))
 
     def _register_node(self, p):
         if isinstance(p, Point):
@@ -141,7 +147,7 @@ class ShapeGraph(object):
         n1 = self._register_node(edge[0])
         n2 = self._register_node(edge[1])
 
-        if n1 < n2:
+        if n1 < n2 or self.direct_graph:
             edge = (n1, n2)
             edge_cuts = tuple(cuts) if cuts else None
         elif n1 > n2:
@@ -149,9 +155,6 @@ class ShapeGraph(object):
             edge_cuts = (cuts[1], cuts[0]) if cuts else None
         else:
             return None
-
-        if edge[0] == 1186 and edge[1] == 1206:
-            print 'bingo', line_index, cuts, edge
 
         if edge not in self._edges:
             es = EdgeInfo(edge, dist, raw_segment, line_index, edge_cuts)
@@ -230,6 +233,19 @@ class ShapeGraph(object):
             valid = True
 
         return valid
+
+    def validate_major_graph(self):
+        """
+        Validate connectivity of generated graph
+        :return: None
+        """
+        if not self.direct_graph:
+            cc = nx.algorithms.components.connected_components(self.graph)
+            mc = sorted([i for i in cc], key=len, reverse=True)
+            assert len(mc) == 1
+        else:
+            # TODO: provide validation for directed graph
+            pass
 
     def gen_major_components(self):
         """
@@ -321,6 +337,7 @@ class ShapeGraph(object):
 
         logging.info('Adding pseudo edges to eliminate gaps between edges')
         for pair in self._pseudo_edges:
+            # TODO: add support of directed graph
             ainx, pa = pair[0]
             binx, pb = pair[1]
             if ainx in major and binx in major and pa != pb:
@@ -332,9 +349,7 @@ class ShapeGraph(object):
             self.graph.add_edge(edge[0], edge[1], weight=segment.distance)
 
         # validate connectivity of generated graph
-        cc = nx.algorithms.components.connected_components(self.graph)
-        mc = sorted([i for i in cc], key=len, reverse=True)
-        assert len(mc) == 1
+        self.validate_major_graph()
 
         logging.info('Graph created with {0} nodes, {1} edges'.format(
             len(self.graph.edges()), len(self.graph.nodes())))
