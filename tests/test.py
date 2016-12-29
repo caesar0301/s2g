@@ -88,7 +88,7 @@ class ShapeGraphCase(unittest.TestCase):
         bounding_box = box(121.428387, 31.027371, 121.430863, 31.030227)
         a = time.time()
         subgraph = self.sg.subgraph_within_box(bounding_box)
-        print time.time() - a
+        print(time.time() - a)
         if self.show_plots:
             plt.figure()
             nx.draw(subgraph, pos=self.sg.node_xy, node_size=50)
@@ -105,7 +105,7 @@ class ShapeGraphCase(unittest.TestCase):
         p = (121.428387, 31.027371)
         a = time.time()
         edges, segments = self.sg.point_projects_to_edges(p, 0.01)
-        print time.time() - a
+        print(time.time() - a)
 
         if self.show_plots:
             plt.figure()
