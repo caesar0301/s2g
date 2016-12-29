@@ -10,7 +10,8 @@ python:
 
 install:
   - sudo apt-get install libgdal-dev
-  - "python setup.py install"
+  - pip install matplotlib
+  - python setup.py install
 
 script:
   - /usr/bin/env python tests/test.py
