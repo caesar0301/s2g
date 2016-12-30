@@ -11,6 +11,8 @@ This mostly urges me to finish this tiny but useful library.
  
 # Install
 
+Requirements: Python 2.7+ or Python 3.3+
+
 ```$xslt
 pip install -U s2g
 ```

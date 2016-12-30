@@ -1,2 +1,2 @@
-from shapegraph import *
-from bonus import *
+from .shapegraph import *
+from .bonus import *
