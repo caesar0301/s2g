@@ -13,8 +13,21 @@ This mostly urges me to finish this tiny but useful library.
 
 Requirements: Python 2.7+ or Python 3.3+
 
+```
+sudo apt-get install python python-pip libgeos-dev
+```
+
+Install `s2g`,
+
 ```$xslt
-pip install -U s2g
+sudo pip install s2g
+```
+
+Extra utilities to run unittests,
+
+```
+sudo apt-get install python-tk
+sudo pip install matplotlib
 ```
 
 # Usage
