@@ -10,7 +10,7 @@ import networkx as nx
 import progressbar
 from shapely.geometry import shape, Point, LineString, box, Polygon
 
-from s2g.bonus import *
+from .bonus import *
 
 logging.basicConfig(stream=sys.stderr, level=logging.INFO)
 
