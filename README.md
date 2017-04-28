@@ -8,7 +8,7 @@ When we process GIS data, a non-trivial problem is the conversion from shape lin
 The latter may benefit from these out-of-box graphical libraries such as [networkx](http://networkx.github.io/)
 and [igraph](http://igraph.org/python/). But the conversion is a headache to components open communities.
 This mostly urges me to finish this tiny but useful library.
- 
+
 # Install
 
 Requirements: Python 2.7+ or Python 3.3+
@@ -74,6 +74,16 @@ graph = sg.to_networkx()  # equivalently sg.graph
 ```
 
 Dive into [source doc](https://github.com/caesar0301/python-s2g/blob/master/s2g/shapegraph.py) to discover other functionalities.
+
+## QA
+
+* Why not NetworkX's `read_shp` function? ([Issue](https://github.com/caesar0301/s2g/issues/4))
+
+I endeavored to avoid reinventing the wheel at the beginning. It has several limitations to meet common road network processing:
+1. It is not able to detect the major components when the shapefile has disconneted parts
+2. It has no buffer mechsnisms to determine the connectivities of line-line, line-point or point-point pairs
+3. It does not support parameter controlled sampling of road lines when we convert geometry lines into edges
+4. It has no pesudo edges to fix the disconnectivity of geometry elements
 
 ## References
 
