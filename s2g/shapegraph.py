@@ -258,13 +258,22 @@ class ShapeGraph(object):
 
         logging.info("Validating pair-wise line connections of raw shapefiles (total {0} lines)".format(L))
 
-        neighbors = [(i, j) for i, j in product(range(0, L), range(0, L)) if j > i]
-        with progressbar.ProgressBar(max_value=len(neighbors)) as bar:
-            for k in range(0, len(neighbors)):
-                bar.update(k + 1)
-                i, j = neighbors[k]
-                if self.validate_pairwise_connectivity(i, j):
-                    graph.add_edge(i, j)
+        # the number of valid couples can be precomputed as
+        # L + (L-1) + (L-2) + ... + 1 = L * (L + 1) / 2
+        # where L are for i=0, L-1 for i=1 and so on
+        # see here for the formula https://en.wikipedia.org/wiki/1_%2B_2_%2B_3_%2B_4_%2B_%E2%8B%AF
+        number_of_couples = L * (L+1) // 2
+
+        with progressbar.ProgressBar(max_value=number_of_couples) as bar:
+            # here a simple counter gets the job done
+            k = 0
+            for i in range(0, L):
+                for j in range(i + 1, L):
+                    bar.update(k + 1)
+                    k += 1
+
+                    if self.validate_pairwise_connectivity(i, j):
+                        graph.add_edge(i, j)
 
         # Validate lines connectivity:
         # Pairs of lines which are connected (touched). These line pairs
