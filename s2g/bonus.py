@@ -1,7 +1,9 @@
 #!/usr/env/bin python
 # encoding: utf-8
+import math
+
 import numpy as np
-from shapely.geometry import Point, box, Polygon, MultiPoint
+from shapely.geometry import MultiPoint, Point, Polygon, box
 
 __all__ = ['plot_lines', 'great_circle_dist', 'gcd', 'perpend_to_line',
            'box_overlay', 'bounded_segments', 'line_distance',
@@ -142,23 +144,28 @@ def lines_touch(one, other, buf=10e-5):
 def point_projects_to_line(point, line):
     """Get the nearest point index on line
     """
-    coords = list(line.coords)
     p = Point(point)
-    pd = line.project(p)
-    for i in range(1, len(coords)):
-        pp = Point(coords[i-1])
-        cp = Point(coords[i])
-        prev = line.project(pp)
-        cur = line.project(cp)
-        if cur == pd:
-            return i
-        if prev == pd:
-            return i - 1
-        if prev < pd < cur:
-            pdist = p.distance(pp)
-            cdist = p.distance(cp)
-            return i-1 if pdist <= cdist else i
-    return None
+
+    # compute
+    min_distance = math.inf
+    closer_point = 0
+
+    for i, vertex_coords in enumerate(line.coords[1:]):
+        vertex = Point(vertex_coords)
+
+        distance = p.distance(vertex)
+        if distance < min_distance:
+            min_distance = distance
+            # in this convention, first point is number 1
+            closer_point = i + 1
+
+    if closer_point != 0:
+        return closer_point
+    else:
+        # exiting here should not happen
+        raise ValueError(
+            "Error: cannot get closer vertex in {} with respect to {}"\
+            .format(line, point))
 
 
 def cut_line(line, resolution, fixed_cuts=list()):
